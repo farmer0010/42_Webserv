@@ -1,16 +1,16 @@
 #include "ServerSocket.hpp"
 
-ServerSocket::ServerSocket()
+ServerSocket::ServerSocket(int PORT)
 {
 	int flags;
 
-	if (this->_server_fd = socket(AF_INET, SOCK_STREAM, 0) < 0){
-		throw std::runtime_error("Socket creation failed");
+	if ((this->_server_fd = socket(AF_INET, SOCK_STREAM, 0)) < 0){
+		throw std::runtime_error("ServerSocket: socket() failed");
 	}
 
 	memset((void*)&_address, 0, sizeof(_address));
 	this->_address.sin_family = AF_INET;
-	this->_address.sin_addr.s_addr = INADDR_ANY; // 0.0.0.0 (모든 인터페이스에서 접속 허용)
+	this->_address.sin_addr.s_addr = INADDR_ANY;
 	this->_address.sin_port = htons(PORT);
 
 	if (bind(this->_server_fd, (struct sockaddr*)&_address, sizeof(_address)) < 0){
@@ -44,7 +44,7 @@ ServerSocket::~ServerSocket()
 	std::cout << "ServerSocket : destructor called\n";
 }
 
-int ServerSocket::getServerfd()
+int ServerSocket::getFd()
 {
 	return this->_server_fd;
 }

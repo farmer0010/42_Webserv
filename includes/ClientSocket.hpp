@@ -13,12 +13,7 @@
 
 enum ClientState{
 	READING,
-	WRITING
-};
-
-struct StateMachine{
-	ClientState		state;
-	ClientSocket*	fd;
+	WRITING,
 };
 
 class ClientSocket
@@ -28,8 +23,9 @@ class ClientSocket
 		struct sockaddr_in _address;
 		std::vector<char> recv_buffer;
 		std::vector<char> send_buffer;
+		ClientState _state;
 	public:
-		ClientSocket();
+		ClientSocket(int client_fd, struct sockaddr_in address);
 		~ClientSocket();
 };
 

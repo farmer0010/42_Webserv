@@ -5,17 +5,22 @@
 # include "ClientSocket.hpp"
 
 # include <sys/epoll.h>
+# include <cerrno>
 # include <map>
+
+# define MAX_EVENTS 1024
 
 class ServerManager
 {
 	private:
-		int	epfd;
-		std::map<int, ServerSocket*> _server;
-		std::map<int, ClientSocket*> _client;
+		int	_epoll_fd;
+		std::map<int, ServerSocket*> _servers;
+		std::map<int, ClientSocket*> _clients;
 	public:
-		ServerManager();
+		ServerManager(int port);
 		~ServerManager();
+
+		void run();
 };
 
 #endif
