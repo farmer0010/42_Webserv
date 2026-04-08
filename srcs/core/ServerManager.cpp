@@ -20,7 +20,7 @@ ServerManager::ServerManager(int port)
 
 	struct epoll_event event;
 	event.events = EPOLLIN;
-	event.data.fd = _servers.begin()->first; // Get the first server socket fd
+	event.data.fd = _servers.begin()->first;
 	if (epoll_ctl(_epoll_fd, EPOLL_CTL_ADD, event.data.fd, &event) < 0){
 		close(_epoll_fd);
 		delete _servers[event.data.fd];

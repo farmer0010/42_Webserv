@@ -1,19 +1,24 @@
 #ifndef CLIENTSOCKET_HPP
 # define CLIENTSOCKET_HPP
 
-# include <stdexcept>
-# include <iostream>
-# include <string>
-# include <cstring>      // memset
 # include <sys/socket.h> // socket, bind, listen, accept, recv, send
 # include <netinet/in.h> // sockaddr_in, htons
 # include <unistd.h>
 # include <fcntl.h>
 # include <vector>
+# include <iostream>
+# include <algorithm> // std::search
+
+# include "HttpRequest.hpp"
+# include "HttpResponse.hpp"
+# include "Cgi.hpp"
 
 enum ClientState{
 	READING,
+	REQUEST_COMPLETE,
+	CGI_PROCESSING,
 	WRITING,
+	RESPONSE_COMPLETE
 };
 
 class ClientSocket
@@ -21,24 +26,37 @@ class ClientSocket
 	private:
 		int	_client_fd; // 클라이언트 소켓 파일 디스크립터
 		struct sockaddr_in _address; // 클라이언트 주소 정보
-		std::vector<char> _recv_buffer; //
-		std::vector<char> _send_buffer; //
+
+		//recv로 받은 정보 저장하는 버퍼 => HTTP 요청 메시지 전체를 저장하는 버퍼
+		std::vector<char> _recv_buffer;
+		//send할 정보 저장하는 버퍼 => HTTP 응답 메시지 전체를 저장하는 버퍼
+		std::vector<char> _send_buffer;
+
+		HttpRequest* _request; // HTTP 요청 객체
+		HttpResponse* _response; // HTTP 응답 객체
+		Cgi* _cgi; // CGI 처리 객체
 		ClientState _state;
+
+
 	public:
 		ClientSocket(int client_fd, struct sockaddr_in address);
 		~ClientSocket();
 
 		//getter
-		int getFd() const { return _client_fd; }
+		int getClientFd() const { return _client_fd; }
 		std::vector<char>& getRecvBuffer() { return _recv_buffer; }
 		std::vector<char>& getSendBuffer() { return _send_buffer; }
 		ClientState getState() const { return _state; }
 
 		//setter
 		void setState(ClientState state) { _state = state; }
-		void appendToSendBuffer(const char* data, size_t length) {
-			_send_buffer.insert(_send_buffer.end(), data, data + length);
-		}
+		void appendToSendBuffer(const char* data, size_t length);
+		void appendToRecvBuffer(const char *data, size_t length);
+
+		//checker
+		bool isHeaderComplete() const;
+		bool isRequestComplete() const;
+		bool isResponseComplete() const;
 };
 
 #endif

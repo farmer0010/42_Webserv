@@ -19,7 +19,7 @@ class ServerSocket
 		ServerSocket(int PORT);
 		~ServerSocket();
 
-		int	getFd();
+		int	getFd(){ return this->_server_fd; };
 };
 
 #endif
