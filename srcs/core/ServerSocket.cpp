@@ -13,7 +13,7 @@ ServerSocket::ServerSocket(int PORT)
 	this->_address.sin_addr.s_addr = INADDR_ANY;
 	this->_address.sin_port = htons(PORT);
 
-	if (bind(this->_server_fd, (struct sockaddr*)&_address, sizeof(_address)) < 0){
+	if (bind(this->_server_fd, reinterpret_cast<struct sockaddr*>(&_address), sizeof(_address)) < 0){
 		close(_server_fd);
 		throw std::runtime_error("bind() failed");
 	}
