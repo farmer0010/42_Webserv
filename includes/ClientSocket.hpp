@@ -19,10 +19,10 @@ enum ClientState{
 class ClientSocket
 {
 	private:
-		int	_client_fd;
-		struct sockaddr_in _address;
-		std::vector<char> _recv_buffer;
-		std::vector<char> _send_buffer;
+		int	_client_fd; // 클라이언트 소켓 파일 디스크립터
+		struct sockaddr_in _address; // 클라이언트 주소 정보
+		std::vector<char> _recv_buffer; //
+		std::vector<char> _send_buffer; //
 		ClientState _state;
 	public:
 		ClientSocket(int client_fd, struct sockaddr_in address);
@@ -36,6 +36,9 @@ class ClientSocket
 
 		//setter
 		void setState(ClientState state) { _state = state; }
+		void appendToSendBuffer(const char* data, size_t length) {
+			_send_buffer.insert(_send_buffer.end(), data, data + length);
+		}
 };
 
 #endif
