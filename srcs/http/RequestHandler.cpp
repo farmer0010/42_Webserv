@@ -1,53 +1,97 @@
 #include "RequestHandler.hpp"
 #include <iostream>
 #include <iterator>
+#include <sys/stat.h>
+#include <unistd.h>
 
-RequestHandler::RequestHandler(){}
-RequestHandler::~RequestHandler(){}
+RequestHandler::RequestHandler() {}
+RequestHandler::~RequestHandler() {}
 
-void RequestHandler::init(const HttpRequest& req){
+void RequestHandler::init(const HttpRequest& req) {
     this->request = req;
     this->response.init();
 
-    // 임시 하드코딩 라우팅 (차후에 config 연동시 교체)
-    if (this->request.getUri() == "/") {
-        this->absolute_path = "./html/index.html";
-    } else {
-        this->absolute_path = "./html" + this->request.getUri();
+    this->absolute_path = "./html" + this->request.getUri();
+
+    if (isDirectory(this->absolute_path)) {
+        if (this->absolute_path[this->absolute_path.length() - 1] != '/')
+            this->absolute_path += "/";
+        this->absolute_path += "index.html";
     }
 }
 
-HttpResponse RequestHandler::processRequest(){
-    if(this->request.getMethod() == "GET"){
+HttpResponse RequestHandler::processRequest() {
+    if (this->request.getMethod() == "GET") {
         handleGet();
     }
-    else if(this->request.getMethod() == "POST")
-    {
+    else if (this->request.getMethod() == "POST") {
         handlePost();
     }
-    else if(this->request.getMethod() == "DELETE"){
+    else if (this->request.getMethod() == "DELETE") {
         handleDelete();
     }
-    else{
+    else {
         generateErrorPage(405);
     }
     return this->response;
 }
 
-void RequestHandler::handleGet(){
-    if(!isFileExists(this->absolute_path)){
+void RequestHandler::handleGet() {
+    if (!isFileExists(this->absolute_path)) {
         generateErrorPage(404);
-        return ;
+        return;
     }
 
     std::ifstream file(this->absolute_path.c_str(), std::ios::binary);
-    if(!file.is_open()){
-        generateErrorPage(403); // 파일있지만 열리지않으면 권한 문제
+    if (!file.is_open()) {
+        generateErrorPage(403);
         return;
     }
-   std::vector<char> file_data((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-this->response.setBody(file_data);
-file.close();
+
+    std::vector<char> file_data((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    this->response.setBody(file_data);
+    file.close();
+}
+
+void RequestHandler::handlePost() {
+    std::ofstream file(this->absolute_path.c_str(), std::ios::binary);
+    if (!file.is_open()) {
+        generateErrorPage(500);
+        return;
+    }
+
+    const std::vector<char>& request_body = this->request.getBody();
+    if (!request_body.empty()) {
+        file.write(&request_body[0], request_body.size());
+    }
+    file.close();
+
+    this->response.setStatusCode(201);
+    this->response.setReasonPhrase("Created");
+    this->response.setBody("<h1>File Uploaded</h1>");
+}
+
+void RequestHandler::handleDelete() {
+    if (!isFileExists(this->absolute_path)) {
+        generateErrorPage(404);
+        return;
+    }
+
+    if (unlink(this->absolute_path.c_str()) == 0) {
+        this->response.setStatusCode(200);
+        this->response.setReasonPhrase("OK");
+        this->response.setBody("<h1>File Deleted</h1>");
+    } else {
+        generateErrorPage(403);
+    }
+}
+
+bool RequestHandler::isDirectory(const std::string& path) {
+    struct stat info;
+    if (stat(path.c_str(), &info) != 0) {
+        return false;
+    }
+    return S_ISDIR(info.st_mode);
 }
 
 bool RequestHandler::isFileExists(const std::string& path) {
@@ -65,9 +109,8 @@ void RequestHandler::generateErrorPage(int status_code) {
     } else if (status_code == 405) {
         this->response.setReasonPhrase("Method Not Allowed");
         this->response.setBody("<h1>405 Method Not Allowed</h1>");
+    } else if (status_code == 500) {
+        this->response.setReasonPhrase("Internal Server Error");
+        this->response.setBody("<h1>500 Internal Server Error</h1>");
     }
 }
-
-void RequestHandler::handlePost() {}
-void RequestHandler::handleDelete() {}
-bool RequestHandler::isDirectory(const std::string& path) { return false; }

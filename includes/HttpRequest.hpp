@@ -26,6 +26,8 @@ class HttpRequest
         const std::map<std::string, std::string>& getHeaders() const {
             return this->headers;
         }
+        const std::vector<char>& getBody() const { 
+            return body; }
 };
 
 #endif
