@@ -24,6 +24,8 @@ private:
     bool isFileExists(const std::string& path);
     void generateErrorPage(int status_code);
 
+    std::string getMimeType(const std::string& path);
+
 public:
     RequestHandler();
     ~RequestHandler();

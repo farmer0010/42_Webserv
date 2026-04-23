@@ -49,6 +49,7 @@ void RequestHandler::handleGet() {
     }
 
     std::vector<char> file_data((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    this->response.addHeader("Content-Type", getMimeType(this->absolute_path));
     this->response.setBody(file_data);
     file.close();
 }
@@ -96,6 +97,29 @@ bool RequestHandler::isDirectory(const std::string& path) {
 
 bool RequestHandler::isFileExists(const std::string& path) {
     return (access(path.c_str(), F_OK) == 0);
+}
+
+std::string RequestHandler::getMimeType(const std::string& path){
+    size_t dot_pos = path.find_last_of('.');
+    if (dot_pos == std::string::npos)
+        return "application/octet-stream";
+    
+        std::string ext = path.substr(dot_pos);
+        if(ext == ".html" || ext == ".htm")
+            return "text/html";
+        if(ext == ".css")
+            return "text/css";
+        if(ext == ".js")
+            return "application/javascript";
+        if(ext == ".jpg" || ext == ".jpeg")
+            return "image/jpeg";
+        if(ext == ".png")
+            return "image/png";
+        if(ext == ".gif")
+            return "image/gif";
+        if(ext == ".txt")
+            return "text/plain";
+        return "application/octet-stream"; 
 }
 
 void RequestHandler::generateErrorPage(int status_code) {
