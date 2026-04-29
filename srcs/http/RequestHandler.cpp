@@ -41,9 +41,21 @@ HttpResponse RequestHandler::processRequest() {
         Cgi cgi_handler(this -> request, this -> absolute_path);
         std::vector<char> cgi_result = cgi_handler.execute();
 
+        std::string cgi_str(cgi_result.begin(), cgi_result.end());
+        size_t header_end = cgi_str.find("\r\n\r\n");
+        size_t delimiter_len = 4;
+
+        if(header_end == std::string::npos){
+            header_end = cgi_str.find("\n\n");
+            delimiter_len = 2;
+        }
         this -> response.setStatusCode(200);
         this -> response.setReasonPhrase("OK");
-        this -> response.setBody(cgi_result);
+        
+        if (header_end != std::string::npos){
+            std::string cgi_headers = cgi_str.substr(0, header_end);
+            std::vector<char> cgi_body(cgi_result.begin() + header_end + delimiter_len, cgi_result.end());
+        }
     }
     else{
         if (this->request.getMethod() == "GET") {
