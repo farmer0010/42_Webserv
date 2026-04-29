@@ -1,4 +1,5 @@
 #include "RequestHandler.hpp"
+#include "Cgi.hpp"
 #include <iostream>
 #include <iterator>
 #include <sys/stat.h>
@@ -21,17 +22,42 @@ void RequestHandler::init(const HttpRequest& req) {
 }
 
 HttpResponse RequestHandler::processRequest() {
-    if (this->request.getMethod() == "GET") {
-        handleGet();
+    bool is_cgi = false;
+    size_t dot_pos = this -> absolute_path.find_last_of('.');
+    
+    if (dot_pos != std::string::npos){
+        std::string ext = this -> absolute_path.substr(dot_pos);
+        if (ext == ".py" || ext == ".php"){
+            is_cgi = true;
+        }
     }
-    else if (this->request.getMethod() == "POST") {
-        handlePost();
+
+    if (is_cgi){
+        if (!isFileExists(this -> absolute_path)){
+            generateErrorPage(404);
+            return this -> response;
+        }
+
+        Cgi cgi_handler(this -> request, this -> absolute_path);
+        std::vector<char> cgi_result = cgi_handler.execute();
+
+        this -> response.setStatusCode(200);
+        this -> response.setReasonPhrase("OK");
+        this -> response.setBody(cgi_result);
     }
-    else if (this->request.getMethod() == "DELETE") {
-        handleDelete();
-    }
-    else {
-        generateErrorPage(405);
+    else{
+        if (this->request.getMethod() == "GET") {
+            handleGet();
+        }
+        else if (this->request.getMethod() == "POST") {
+            handlePost();
+        }
+        else if (this->request.getMethod() == "DELETE") {
+            handleDelete();
+        }
+        else {
+            generateErrorPage(405);
+        }
     }
     return this->response;
 }

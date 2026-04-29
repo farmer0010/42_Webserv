@@ -62,27 +62,49 @@ void Cgi::freeEnv(){
 
 std::vector<char> Cgi::execute(){
     std::vector<char> result;
-    int pipe_fd[2];
+    int pipe_in[2];
+    int pipe_out[2];
     pid_t pid;
 
-    if(pipe(pipe_fd) == -1){
+    if(pipe(pipe_in) == -1 || pipe(pipe_out) == -1){
+        std::cerr << "CGI Error: pipe() failed\n";
         return result;
     }
 
     pid = fork();
     if (pid == -1){
-        close(pipe_fd[0]);
-        close(pipe_fd[1]);
+        std::cerr << "CGI Error: fork() failed\n";
+       
+        close(pipe_in[0]);
+        close(pipe_in[1]);
+        close(pipe_out[0]);
+        close(pipe_out[1]);
         return result;
     }
 
     if (pid == 0){
-        close(pipe_fd[0]);
-        dup2(pipe_fd[1], STDOUT_FILENO);
-        close(pipe_fd[1]);
+        close(pipe_in[1]);
+        close(pipe_out[0]);
+
+        dup2(pipe_in[0], STDIN_FILENO);
+        close(pipe_in[0]);
+
+        dup2(pipe_out[1], STDOUT_FILENO);
+        close(pipe_out[1]);
+
+        std::string exec_bin = "/usr/bin/python3";
+        size_t dot_pos = this -> script_path.find_last_of('.');
+        if(dot_pos != std::string::npos){
+            std::string ext = this -> script_path.substr(dot_pos);
+            if (ext == ".php")
+                exec_bin = "/usr/bin/php";
+            else if (ext == ".py")
+                exec_bin = "/usr/bin/python3";
+        }
+
 
         char *args[] = {
-            (char*)"/usr/bin/python3",
+            (char*)exec_bin.c_str(),
             (char*)this->script_path.c_str(),
             NULL
         };
@@ -90,19 +112,26 @@ std::vector<char> Cgi::execute(){
         exit(1);
     }
     else {
-        close(pipe_fd[1]);
+        close(pipe_in[0]);
+        close(pipe_out[1]);
+
+        const std::vector<char>& request_body = this -> request.getBody();
+        if (!request_body.empty()){
+            write(pipe_in[1], &request_body[0], request_body.size());
+        }
+        close(pipe_in[1]);
 
         char buffer[1024];
         ssize_t bytes_read;
 
-        while((bytes_read = read(pipe_fd[0], buffer, sizeof(buffer))) > 0){
+        while((bytes_read = read(pipe_out[0], buffer, sizeof(buffer))) > 0){
             result.insert(result.end(), buffer, buffer + bytes_read);
         }
         
         int status;
         waitpid(pid, &status, 0); 
         
-        close(pipe_fd[0]);
+        close(pipe_out[0]);
     }
     return result;
 }
