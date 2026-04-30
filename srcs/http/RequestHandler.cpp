@@ -55,6 +55,13 @@ HttpResponse RequestHandler::processRequest() {
         if (header_end != std::string::npos){
             std::string cgi_headers = cgi_str.substr(0, header_end);
             std::vector<char> cgi_body(cgi_result.begin() + header_end + delimiter_len, cgi_result.end());
+
+            this->response.addHeader("Content-Type", "text/html");
+            this->response.setBody(cgi_body);
+        }
+        else{
+            this->response.addHeader("Content-Type", "text/plain");
+            this->response.setBody(cgi_result);
         }
     }
     else{
