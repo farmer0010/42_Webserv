@@ -33,6 +33,7 @@ public:
     void init(const HttpRequest& req);
 
     HttpResponse processRequest();
+    void handleCgiResponse(const std::vector<char>& cgi_result);
 };
 
 #endif
