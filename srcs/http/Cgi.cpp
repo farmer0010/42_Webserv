@@ -5,14 +5,15 @@
 #include <cstring>
 #include <iostream>
 #include <fcntl.h>
+#include <cerrno>
 
 Cgi::Cgi(const HttpRequest& req, const std::string& path) 
-    : request(req), script_path(path), envp(NULL), pid(-1) {
+    : request(req), script_path(path), envp(NULL), pid(-1), sent_body_size(0) {
     pipe_in[0] = -1; pipe_in[1] = -1;
     pipe_out[0] = -1; pipe_out[1] = -1;
     
-    initEnv();  // 기록
-    mapToCharArrays(); // 기록 내용을 os가 읽는 방식으로 변경
+    initEnv(); 
+    mapToCharArrays();
 }
 
 Cgi::~Cgi() {
@@ -111,4 +112,57 @@ bool Cgi::execute() {
         close(pipe_out[1]);
         return true;
     }
+}
+
+ssize_t Cgi::writeToPipe() {
+    if (pipe_in[1] == -1)
+        return 0;
+    
+    const std::vector<char>& body = this->request.getBody();
+
+    if (body.empty() || sent_body_size >= body.size()) {
+        close(pipe_in[1]);
+        pipe_in[1] = -1;
+        return 0;
+    }
+
+    ssize_t bytes = write(pipe_in[1], &body[sent_body_size], body.size() - sent_body_size);
+    
+    if (bytes > 0) {
+        sent_body_size += bytes;
+        if (sent_body_size >= body.size()) {
+            close(pipe_in[1]);
+            pipe_in[1] = -1;
+        }
+    } 
+    else if (bytes == -1) {
+        if (errno != EAGAIN && errno != EWOULDBLOCK) {
+            close(pipe_in[1]);
+            pipe_in[1] = -1;
+        }
+    }
+    return bytes;
+}
+
+ssize_t Cgi::readFromPipe() {
+    if (pipe_out[0] == -1)
+        return 0;
+    
+    char buffer[4096];
+    ssize_t bytes = read(pipe_out[0], buffer, sizeof(buffer));
+
+    if (bytes > 0) {
+        response_buffer.insert(response_buffer.end(), buffer, buffer + bytes);
+    }
+    else if (bytes == 0) {
+        close(pipe_out[0]);
+        pipe_out[0] = -1;
+    }
+    else if (bytes == -1) {
+        if (errno != EAGAIN && errno != EWOULDBLOCK) {
+            close(pipe_out[0]);
+            pipe_out[0] = -1;
+        }
+    }
+    return bytes;
 }
