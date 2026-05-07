@@ -3,6 +3,7 @@
 
 # include "HttpRequest.hpp"
 # include "HttpResponse.hpp"
+# include "Cgi.hpp"
 # include <string>
 # include <fstream>
 # include <unistd.h>
@@ -15,6 +16,8 @@ private:
     HttpResponse response;
 
     std::string absolute_path;
+
+    Cgi* cgi;
 
     void handleGet();
     void handlePost();
@@ -34,6 +37,8 @@ public:
 
     HttpResponse processRequest();
     void handleCgiResponse(const std::vector<char>& cgi_result);
+
+    Cgi* getCgi() const {return cgi;}
 };
 
 #endif

@@ -7,7 +7,7 @@
 #include <sstream>
 #include <vector>
 
-RequestHandler::RequestHandler() {
+RequestHandler::RequestHandler() : cgi(NULL) {
 
 }
 RequestHandler::~RequestHandler() {
@@ -43,13 +43,14 @@ HttpResponse RequestHandler::processRequest() {
             return this->response;
         }
 
-        Cgi cgi_handler(this->request, this->absolute_path);
+        this -> cgi = new Cgi(this-> request, this -> absolute_path);
         
-        if (cgi_handler.execute() == false) {
+        if (this->cgi->execute() == false) {
+            delete this -> cgi;
+            this -> cgi = NULL;
             generateErrorPage(500);
             return this->response;
         }
-
         return this->response;
     } 
     else {
