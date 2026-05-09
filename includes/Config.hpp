@@ -1,15 +1,17 @@
 #ifndef CONFIG_HPP
 # define CONFIG_HPP
 
+class Location;
+
 class Config
 {
 	private:
-		// Config 관련 멤버 변수 선언
+		Location* _location;
 	public:
 		Config();
 		~Config();
 
-		// Config 처리 메서드 선언
+
 };
 
 #endif
