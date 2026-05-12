@@ -1,6 +1,8 @@
 #ifndef SERVERSOCKET_HPP
 # define SERVERSOCKET_HPP
 
+# include "Config.hpp"
+
 # include <stdexcept>
 # include <iostream>
 # include <string>
@@ -15,8 +17,10 @@ class ServerSocket
 	private:
 		int	_server_fd;
 		struct sockaddr_in _address;
+		std::vector<ServerBlock> _server_blocks;
 	public:
-		ServerSocket(int PORT);
+		ServerSocket();
+		void init(int port,const std::vector<ServerBlock>& serverBlocks);
 		~ServerSocket();
 
 		int	getFd(){ return this->_server_fd; };
