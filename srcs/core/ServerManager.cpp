@@ -1,10 +1,26 @@
 #include "ServerManager.hpp"
 
-ServerManager::ServerManager(int port)
+ServerManager::ServerManager() : _epoll_fd(-1)
 {
-	// Initialize server socket
+	std::cout << "ServerManager : constructor called\n";
+}
+
+ServerManager::~ServerManager()
+{
+	close(_epoll_fd);
+	for (std::map<int, ServerSocket*>::iterator it = _servers.begin(); it != _servers.end(); ++it) {
+		delete it->second;
+	}
+	for (std::map<int, ClientSocket*>::iterator it = _clients.begin(); it != _clients.end(); ++it) {
+		delete it->second;
+	}
+	std::cout << "ServerManager : destructor called\n";
+}
+
+void ServerManager::init(const Config& config) {
+
 	try {
-		ServerSocket* server = new ServerSocket(port);
+		ServerSocket* server = new ServerSocket();
 		_servers[server->getFd()] = server;
 	} catch (const std::exception& e) {
 		std::cerr << "ServerManager: Error initializing ServerManager: " << e.what() << std::endl;
@@ -26,19 +42,6 @@ ServerManager::ServerManager(int port)
 		delete _servers[event.data.fd];
 		throw std::runtime_error("epoll_ctl() failed\n");
 	}
-
-}
-
-ServerManager::~ServerManager()
-{
-	close(_epoll_fd);
-	for (std::map<int, ServerSocket*>::iterator it = _servers.begin(); it != _servers.end(); ++it) {
-		delete it->second;
-	}
-	for (std::map<int, ClientSocket*>::iterator it = _clients.begin(); it != _clients.end(); ++it) {
-		delete it->second;
-	}
-	std::cout << "ServerManager : destructor called\n";
 }
 
 void ServerManager::run() {

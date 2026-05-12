@@ -1,6 +1,7 @@
 #ifndef SERVERMANAGER_HPP
 # define SERVERMANAGER_HPP
 
+# include "Config.hpp"
 # include "ServerSocket.hpp"
 # include "ClientSocket.hpp"
 
@@ -16,9 +17,10 @@ class ServerManager
 		std::map<int, ServerSocket*> _servers;
 		std::map<int, ClientSocket*> _clients;
 	public:
-		ServerManager(int port);
+		ServerManager();
 		~ServerManager();
 
+		void init(const Config& config);
 		void run();
 };
 

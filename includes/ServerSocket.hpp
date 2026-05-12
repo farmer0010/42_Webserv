@@ -4,7 +4,7 @@
 # include <stdexcept>
 # include <iostream>
 # include <string>
-# include <cstring>      // memset
+# include <cstring>
 # include <sys/socket.h> // socket, bind, listen, accept, recv, send
 # include <netinet/in.h> // sockaddr_in, htons
 # include <unistd.h>
