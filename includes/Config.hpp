@@ -5,6 +5,7 @@
 # include <vector>
 # include <map>
 # include "Location.hpp"
+# include "ServerBlock.hpp"
 
 class Config
 {
