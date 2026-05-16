@@ -23,27 +23,27 @@ void ServerManager::init(const Config& config) {
     //epoll 생성
     _epoll_fd = epoll_create(1);
 	if (_epoll_fd < 0){
-		close(_epoll_fd);
 		throw std::runtime_error("epoll_create() failed\n");
 	}
 
-    // 서버블록을 포트별로 그룹화
-    const std::vector<ServerBlock> serverBlocks = config.getServerBlocks();
-    std::map<int, std::vector<ServerBlock>> groupingByPort;
-    for(size_t i = 0; i < serverBlocks.size(); ++i) {
-        groupingByPort[serverBlocks[i].port].push_back(serverBlocks[i]);
+    // 서버블록을 포트+ip로 그룹화
+    const std::vector<ServerBlock>& serverBlocks = config.getServerBlocks();
+    std::map<std::pair<std::string, int>, std::vector<const ServerBlock*> > grouping;
+    for (size_t i = 0; i < serverBlocks.size(); ++i) {
+        std::pair<std::string, int> key(serverBlocks[i].getHost(), serverBlocks[i].getPort());
+        grouping[key].push_back(&serverBlocks[i]);
     }
 
     // 서버 소켓 할당 및 초기화
-    for (std::map<int, std::vector<ServerBlock> >::iterator it = groupingByPort.begin(); it != groupingByPort.end(); ++it) {
+    std::map<std::pair<std::string, int>, std::vector<const ServerBlock*> >::iterator it;
+    for (it = grouping.begin(); it != grouping.end(); ++it) {
         ServerSocket* server = new ServerSocket();
         try {
-            server->init(it->first, it->second);
+            server->init(it->first.first, it->first.second, it->second);
             _servers[server->getFd()] = server;
         } catch (const std::exception& e) {
             std::cerr << "ServerManager: Error initializing ServerManager: " << e.what() << std::endl;
-            delete server;
-            throw; // Rethrow the exception after logging
+            throw;
         }
     }
 

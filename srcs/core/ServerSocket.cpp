@@ -1,27 +1,36 @@
 #include "ServerSocket.hpp"
 
-ServerSocket::ServerSocket()
+ServerSocket::ServerSocket() : _server_fd(-1)
 {
-	std::cout << "ServerSocket(" << "_server_fd:" << _server_fd << "): constructor called\n";
+	std::cout << "ServerSocket: constructor called\n";
 }
 
-void ServerSocket::init(int port,const std::vector<ServerBlock>& serverBlocks)
+void ServerSocket::init(std::string host, int port, const std::vector<const ServerBlock*>& serverBlocks)
 {
 	int flags;
 
-	// 멤버변수 초기화
+	// 서버 블록 저장 (포트+ip로 그룹화된 서버블록이 전달됨)
 	this->_server_blocks = serverBlocks;
-	memset((void*)&_address, 0, sizeof(_address));
-	this->_address.sin_family = AF_INET;
-	this->_address.sin_addr.s_addr = INADDR_ANY;
-	this->_address.sin_port = htons(port);
+
+	// 소켓 주소 구조체 초기화
+	struct addrinfo hints, *res;
+	memset(&hints, 0, sizeof(hints));
+	hints.ai_family = AF_INET;
+	hints.ai_socktype = SOCK_STREAM;
+	if (getaddrinfo(host.c_str(), NULL, &hints, &res) != 0)
+		throw std::runtime_error("ServerSocket: getaddrinfo() failed: " + host);
+	memset(&_address, 0, sizeof(_address));
+	_address.sin_family = AF_INET;
+	_address.sin_addr = reinterpret_cast<struct sockaddr_in*>(res->ai_addr)->sin_addr;
+	_address.sin_port = htons(port);
+	freeaddrinfo(res);
 
 	// 소켓 생성
 	if ((this->_server_fd = socket(AF_INET, SOCK_STREAM, 0)) < 0){
 		throw std::runtime_error("ServerSocket: socket() failed");
 	}
 
-	// 소켓 옵션 설정 (재사용 가능)
+	// 소켓 옵션 설정 (포트 재사용 설정)
 	int opt = 1;
 	if (setsockopt(this->_server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0){
 		throw std::runtime_error("setsockopt() failed");
@@ -53,7 +62,7 @@ void ServerSocket::init(int port,const std::vector<ServerBlock>& serverBlocks)
 
 ServerSocket::~ServerSocket()
 {
-	if (this->_server_fd > 0)
+	if (this->_server_fd >= 0)
 		close(_server_fd);
 	std::cout << "ServerSocket : destructor called\n";
 }
