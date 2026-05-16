@@ -11,15 +11,18 @@
 
 # include "HttpRequest.hpp"
 # include "HttpResponse.hpp"
+# include "RequestHandler.hpp"
 # include "ServerSocket.hpp"
 # include "Cgi.hpp"
 
 enum ClientState{
 	READING,
-	REQUEST_COMPLETE,
-	CGI_PROCESSING,
+	PROCESSING,
+	CGI_WRITING_BODY,
+	CGI_READING_OUTPUT,
+	PROCESSING_CGI_OUTPUT,
 	WRITING,
-	RESPONSE_COMPLETE
+	DONE
 };
 
 class ClientSocket
@@ -27,16 +30,19 @@ class ClientSocket
 	private:
 		int	_client_fd;
 		struct sockaddr_in _address;
-		//recv로 받은 정보 저장하는 버퍼 => HTTP 요청 메시지 전체를 저장하는 버퍼
+		std::vector<const ServerBlock*> _server_blocks;
+
 		std::vector<char> _recv_buffer;
-		//send할 정보 저장하는 버퍼 => HTTP 응답 메시지 전체를 저장하는 버퍼
 		std::vector<char> _send_buffer;
+		size_t _bytes_sent;
 
-		HttpRequest* _request; // HTTP 요청 객체
-		HttpResponse* _response; // HTTP 응답 객체
-		Cgi* _cgi; // CGI 처리 객체
 		ClientState _state;
+		time_t _last_active_time;
 
+		HttpRequest _request;
+		HttpResponse _response;
+		RequestHandler _request_handler;
+		Cgi _cgi;
 
 	public:
 		ClientSocket();
@@ -44,21 +50,11 @@ class ClientSocket
 
 		void init(int client_fd, struct sockaddr_in address, ServerSocket* parent);
 
-		//getter
-		int getClientFd() const { return _client_fd; }
-		std::vector<char>& getRecvBuffer() { return _recv_buffer; }
-		std::vector<char>& getSendBuffer() { return _send_buffer; }
-		ClientState getState() const { return _state; }
-
-		//setter
-		void setState(ClientState state) { _state = state; }
-		void appendToSendBuffer(const char* data, size_t length);
-		void appendToRecvBuffer(const char *data, size_t length);
-
-		//checker
-		bool isHeaderComplete() const;
-		bool isRequestComplete() const;
-		bool isResponseComplete() const;
+		// 서버매니저가 클라이언트 소켓에서 데이터를 읽을 때 호출
+		void handleRead();
+		void handleWrite();
+		void handleCgiRead();
+		void handleCgiWrite();
 };
 
 #endif
