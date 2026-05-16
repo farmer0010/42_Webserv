@@ -11,19 +11,22 @@
 # include <netinet/in.h> // sockaddr_in, htons
 # include <unistd.h>
 # include <fcntl.h>
+# include <netdb.h>
+# include <arpa/inet.h>
 
 class ServerSocket
 {
 	private:
 		int	_server_fd;
 		struct sockaddr_in _address;
-		std::vector<ServerBlock> _server_blocks;
+		std::vector<const ServerBlock*> _server_blocks;
 	public:
 		ServerSocket();
-		void init(int port,const std::vector<ServerBlock>& serverBlocks);
+		void init(std::string host, int port, const std::vector<const ServerBlock*>& serverBlocks);
 		~ServerSocket();
 
 		int	getFd(){ return this->_server_fd; };
+		const std::vector<const ServerBlock*>& getServerBlocks() const { return _server_blocks; }
 };
 
 #endif
