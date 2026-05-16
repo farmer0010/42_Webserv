@@ -1,18 +1,22 @@
 #include "ClientSocket.hpp"
 
-ClientSocket::ClientSocket(int client_fd, sockaddr_in address)
+ClientSocket::ClientSocket() : _client_fd(-1)
 {
-	this->_client_fd = client_fd;
-	this->_address = address;
-	this->_state = READING;
-
-	std::cout << "ClientSocket(" << "_client_fd:" << _client_fd << "): constructor called\n";
+	std::cout << "ClientSocket: constructor called\n";
 }
 
 ClientSocket::~ClientSocket() {
     if (_client_fd > 0) {
         close(_client_fd);
     }
+}
+
+void ClientSocket::init(int client_fd, struct sockaddr_in address, ServerSocket* parent)
+{
+	_client_fd = client_fd;
+	_address = address;
+	_server_blocks = parent->getServerBlocks();
+	std::cout << "ClientSocket: init called\n";
 }
 
 void ClientSocket::appendToSendBuffer(const char *data, size_t length)
