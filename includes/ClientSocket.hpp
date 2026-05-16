@@ -11,6 +11,7 @@
 
 # include "HttpRequest.hpp"
 # include "HttpResponse.hpp"
+# include "ServerSocket.hpp"
 # include "Cgi.hpp"
 
 enum ClientState{
@@ -24,9 +25,8 @@ enum ClientState{
 class ClientSocket
 {
 	private:
-		int	_client_fd; // 클라이언트 소켓 파일 디스크립터
-		struct sockaddr_in _address; // 클라이언트 주소 정보
-
+		int	_client_fd;
+		struct sockaddr_in _address;
 		//recv로 받은 정보 저장하는 버퍼 => HTTP 요청 메시지 전체를 저장하는 버퍼
 		std::vector<char> _recv_buffer;
 		//send할 정보 저장하는 버퍼 => HTTP 응답 메시지 전체를 저장하는 버퍼
@@ -39,8 +39,10 @@ class ClientSocket
 
 
 	public:
-		ClientSocket(int client_fd, struct sockaddr_in address);
+		ClientSocket();
 		~ClientSocket();
+
+		void init(int client_fd, struct sockaddr_in address, ServerSocket* parent);
 
 		//getter
 		int getClientFd() const { return _client_fd; }
