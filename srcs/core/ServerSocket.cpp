@@ -67,7 +67,3 @@ ServerSocket::~ServerSocket()
 	std::cout << "ServerSocket : destructor called\n";
 }
 
-int ServerSocket::getFd()
-{
-	return this->_server_fd;
-}

@@ -16,6 +16,12 @@ class ServerManager
 		int	_epoll_fd;
 		std::map<int, ServerSocket*> _servers;
 		std::map<int, ClientSocket*> _clients;
+
+		void dispatchEvents(int fd, uint32_t evs);
+		void handleAccept(int server_fd);
+		void removeClient(int client_fd);
+		void setEpollEvents(int fd, uint32_t events);
+
 	public:
 		ServerManager();
 		~ServerManager();
