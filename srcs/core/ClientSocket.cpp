@@ -225,7 +225,7 @@ void ClientSocket::handleRead()
 	}
 
 	_recv_buffer.insert(_recv_buffer.end(), buf, buf + n);
-	_last_active_time = time(NULL);
+	_last_act ive_time = time(NULL);
 
 	if (!isHeaderComplete())
 		return;
@@ -244,28 +244,27 @@ void ClientSocket::handleRead()
 	processRequest();
 }
 
-// send_buffer를 한 이벤트에 최대한 전송, 완료 후 keep-alive 여부에 따라 분기
+// LT 모드: EPOLLOUT 발화 = 커널 송신 버퍼에 공간 보장
+// 1회 send로 충분, EAGAIN 발생 상황이 없으므로 errno 체크 불필요
+// 미전송 데이터가 남으면 state = WRITING 유지, LT가 EPOLLOUT 재발화
 void ClientSocket::handleWrite()
 {
-	while (_bytes_sent < _send_buffer.size()) {
-		ssize_t n = send(_client_fd,
-						 _send_buffer.data() + _bytes_sent,
-						 _send_buffer.size() - _bytes_sent,
-						 0);
-		if (n < 0) {
-			if (errno == EAGAIN || errno == EWOULDBLOCK)
-				return; // 커널 송신 버퍼 가득 참, 다음 EPOLLOUT 대기
-			_state = DONE;
-			return;
-		}
-		_bytes_sent += n;
-	}
-
-	// 모든 데이터 전송 완료
-	if (isKeepAlive())
-		resetForKeepAlive(); // → state = READING, dispatchEvents가 EPOLLIN으로 전환
-	else
+	ssize_t n = send(_client_fd,
+					 _send_buffer.data() + _bytes_sent,
+					 _send_buffer.size() - _bytes_sent,
+					 0);
+	if (n < 0) {
 		_state = DONE;
+		return;
+	}
+	_bytes_sent += n;
+
+	if (_bytes_sent >= _send_buffer.size()) {
+		if (isKeepAlive())
+			resetForKeepAlive();
+		else
+			_state = DONE;
+	}
 }
 
 void ClientSocket::handleCgiRead()

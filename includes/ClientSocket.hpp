@@ -11,7 +11,6 @@
 # include <string>
 # include <map>
 # include <algorithm>
-# include <cerrno>
 # include <iostream>
 
 # include "HttpRequest.hpp"
