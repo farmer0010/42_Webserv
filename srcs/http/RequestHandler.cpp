@@ -1,4 +1,6 @@
 #include "RequestHandler.hpp"
+#include "Config.hpp"
+#include "ConfigParser.hpp"
 #include "Cgi.hpp"
 #include <iostream>
 #include <iterator>
@@ -7,9 +9,14 @@
 #include <sstream>
 #include <vector>
 
-RequestHandler::RequestHandler() : cgi(NULL) {
+RequestHandler::RequestHandler() : cgi(NULL), _server_config(NULL) {
 
 }
+
+RequestHandler::RequestHandler(const ServerBlock& Config) : cgi(NULL), _server_config(&Config) {
+
+}
+
 RequestHandler::~RequestHandler() {
     
 }
@@ -17,12 +24,23 @@ RequestHandler::~RequestHandler() {
 void RequestHandler::init(const HttpRequest& req) {
     this->request = req;
     this->response.init();
-    this->absolute_path = "./html" + this->request.getUri();
 
-    if (isDirectory(this->absolute_path)) {
-        if (this->absolute_path[this->absolute_path.length() - 1] != '/')
-            this->absolute_path += "/";
-        this->absolute_path += "index.html";
+    if (this->_server_config != NULL) {
+        const Location& loc = this->_server_config->getLocationForUri(this->request.getUri());
+        this->absolute_path = loc.getRoot() + this->request.getUri();
+
+        if (isDirectory(this->absolute_path)) {
+            if (this->absolute_path[this->absolute_path.length() - 1] != '/')
+                this->absolute_path += "/";
+            this->absolute_path += loc.getIndex();
+        } else {
+            this->absolute_path = "./html" + this->request.getUri();
+            if (isDirectory(this->absolute_path)) {
+                if (this->absolute_path[this->absolute_path.length() - 1] != '/')
+                    this->absolute_path += "/";
+                this->absolute_path += "index.html";
+            }
+        }
     }
 }
 

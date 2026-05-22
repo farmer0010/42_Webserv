@@ -1,4 +1,5 @@
 #include "ServerManager.hpp"
+#include "ClientSocket.hpp"
 #include "ConfigParser.hpp"
 
 int main(int argc, char* argv[])

@@ -1,10 +1,26 @@
-#include "ServerBlock.hpp"
+#include "Config.hpp"
+
+Location::Location() {}
+Location::~Location() {}
+
+void Location::init() {
+	this->_path = "";
+	this->_root = "";
+	this->_index = "index.html";
+	this->_autoindex = false;
+}
 
 ServerBlock::ServerBlock() {}
-
 ServerBlock::~ServerBlock() {}
 
-const Location& ServerBlock::getLocationForuri(const std::string& uri) const {
+void ServerBlock::init() {
+	this->_port = 80;
+	this->_server_name = "";
+	this->_client_max_body_size = 1048576;
+	this->_locations.clear();
+}
+
+const Location& ServerBlock::getLocationForUri(const std::string& uri) const {
 	const Location* best_match = NULL;
 	size_t	max_len = 0;
 

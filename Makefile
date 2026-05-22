@@ -18,7 +18,9 @@ OBJS_DIR    = objs
 SRCS_FILES  = main.cpp \
               core/ServerSocket.cpp \
               core/ServerManager.cpp \
-              core/ClientSocket.cpp
+              core/ClientSocket.cpp \
+			  config/ConfigParser.cpp \
+			  config/ServerBlock.cpp
 # 나중에 추가될 파일들 예시:
 #             http/Request.cpp \
 #             http/Response.cpp \
