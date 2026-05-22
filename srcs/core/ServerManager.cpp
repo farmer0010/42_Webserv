@@ -99,6 +99,25 @@ void ServerManager::removeClient(int client_fd)
 	_clients.erase(client_fd);
 }
 
+// CGI 파이프 fd를 epoll에 등록하고 _cgi_to_client 맵에 기록
+void ServerManager::addCgiFd(int cgi_fd, int client_fd, uint32_t events)
+{
+	struct epoll_event event;
+	event.events = events;
+	event.data.fd = cgi_fd;
+	if (epoll_ctl(_epoll_fd, EPOLL_CTL_ADD, cgi_fd, &event) < 0)
+		return;
+	_cgi_to_client[cgi_fd] = client_fd;
+}
+
+// CGI 파이프 fd를 epoll에서 제거하고 닫기
+void ServerManager::removeCgi(int cgi_fd)
+{
+	epoll_ctl(_epoll_fd, EPOLL_CTL_DEL, cgi_fd, NULL);
+	close(cgi_fd);
+	_cgi_to_client.erase(cgi_fd);
+}
+
 void ServerManager::setEpollEvents(int fd, uint32_t events)
 {
 	struct epoll_event event;
@@ -116,11 +135,53 @@ void ServerManager::dispatchEvents(int fd, uint32_t evs)
 		return;
 	}
 
+	// CGI 파이프 fd: CGI 프로세스와의 I/O 처리
+	if (_cgi_to_client.find(fd) != _cgi_to_client.end()) {
+		int client_fd = _cgi_to_client[fd];
+		ClientSocket* client = _clients[client_fd];
+
+		// EPOLLOUT: write pipe → CGI stdin에 body 전송
+		if (evs & EPOLLOUT)
+			client->handleCgiWrite();
+		// EPOLLIN | EPOLLHUP: read pipe → CGI stdout 읽기
+		// EPOLLHUP는 CGI 프로세스 종료 신호, 남은 데이터를 다 읽을 때까지 처리
+		if (evs & (EPOLLIN | EPOLLHUP))
+			client->handleCgiRead();
+		// EPOLLERR: 파이프 에러 → 연결 정리
+		if ((evs & EPOLLERR) && !(evs & EPOLLIN)) {
+			removeCgi(fd);
+			removeClient(client_fd);
+			return;
+		}
+
+		ClientState state = client->getState();
+		if (state == CGI_READING_OUTPUT) {
+			// write 완료: write pipe fd 제거, read pipe fd 등록
+			removeCgi(fd);
+			int read_fd = client->getCgiReadFd();
+			if (read_fd >= 0)
+				addCgiFd(read_fd, client_fd, EPOLLIN);
+		} else if (state == WRITING) {
+			// CGI 출력 수신 완료: read pipe fd 제거, 클라이언트 fd를 EPOLLOUT으로 전환
+			removeCgi(fd);
+			setEpollEvents(client_fd, EPOLLOUT);
+		} else if (state == DONE) {
+			removeCgi(fd);
+			removeClient(client_fd);
+		}
+		return;
+	}
+
 	// 클라이언트 소켓: 읽기/쓰기 처리
 	if (_clients.find(fd) != _clients.end()) {
 		ClientSocket* client = _clients[fd];
 
 		if (evs & (EPOLLERR | EPOLLHUP)) {
+			// CGI 실행 중 클라이언트가 끊긴 경우 열린 CGI fd도 함께 정리
+			int write_fd = client->getCgiWriteFd();
+			int read_fd  = client->getCgiReadFd();
+			if (write_fd >= 0 && _cgi_to_client.count(write_fd)) removeCgi(write_fd);
+			if (read_fd  >= 0 && _cgi_to_client.count(read_fd))  removeCgi(read_fd);
 			removeClient(fd);
 			return;
 		}
@@ -132,7 +193,13 @@ void ServerManager::dispatchEvents(int fd, uint32_t evs)
 		ClientState state = client->getState();
 		if (state == WRITING)
 			setEpollEvents(fd, EPOLLOUT);
-		else if (state == READING)   // keep-alive: 응답 완료 후 다음 요청 대기
+		else if (state == CGI_WRITING_BODY) {
+			// processRequest가 CGI 진입: write pipe fd를 epoll에 등록
+			int write_fd = client->getCgiWriteFd();
+			if (write_fd >= 0)
+				addCgiFd(write_fd, fd, EPOLLOUT);
+		}
+		else if (state == READING)   // keep-alive
 			setEpollEvents(fd, EPOLLIN);
 		else if (state == DONE)
 			removeClient(fd);

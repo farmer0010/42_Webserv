@@ -1,6 +1,6 @@
 #include "ClientSocket.hpp"
 
-ClientSocket::ClientSocket() : _client_fd(-1), _bytes_sent(0), _state(READING), _last_active_time(0)
+ClientSocket::ClientSocket() : _client_fd(-1), _bytes_sent(0), _state(READING), _last_active_time(0), _cgi(NULL)
 {
 }
 
@@ -267,14 +267,50 @@ void ClientSocket::handleWrite()
 	}
 }
 
-void ClientSocket::handleCgiRead()
+// CGI 파이프 fd 접근자 (ServerManager가 epoll 등록에 사용)
+int ClientSocket::getCgiWriteFd() const
 {
-	// TODO: Cgi 영역과 연동
-	_state = PROCESSING_CGI_OUTPUT;
+	Cgi* cgi = _request_handler.getCgi();
+	return cgi ? cgi->getWriteFd() : -1;
 }
 
+int ClientSocket::getCgiReadFd() const
+{
+	Cgi* cgi = _request_handler.getCgi();
+	return cgi ? cgi->getReadFd() : -1;
+}
+
+// LT 모드: EPOLLOUT 발화 시 POST body를 CGI stdin에 1회 전송
+// writeToPipe() 반환값: >0 = 더 남음, 0 = 전송 완료, <0 = 에러
 void ClientSocket::handleCgiWrite()
 {
-	// TODO: Cgi 영역과 연동
-	_state = CGI_READING_OUTPUT;
+	Cgi* cgi = _request_handler.getCgi();
+	if (!cgi) { _state = DONE; return; }
+
+	ssize_t n = cgi->writeToPipe();
+	if (n < 0) { _state = DONE; return; }
+	if (n == 0)
+		_state = CGI_READING_OUTPUT; // body 전송 완료 → 결과 읽기 단계로
+}
+
+// LT 모드: EPOLLIN 발화 시 CGI stdout에서 1회 읽기
+// readFromPipe() 반환값: >0 = 더 남음, 0 = EOF(CGI 종료), <0 = 에러
+void ClientSocket::handleCgiRead()
+{
+	Cgi* cgi = _request_handler.getCgi();
+	if (!cgi) { _state = DONE; return; }
+
+	ssize_t n = cgi->readFromPipe();
+	if (n < 0) { _state = DONE; return; }
+	if (n == 0) {
+		// CGI 프로세스 종료 → 응답 구성
+		// handleCgiResponse: CGI 출력을 파싱해 RequestHandler 내부 response 갱신
+		_request_handler.handleCgiResponse(cgi->getResponseBuffer());
+		// TODO: RequestHandler::getResponse() 추가되면 _response를 갱신해야 함
+		std::string resp_str = _response.buildResponse();
+		_send_buffer.insert(_send_buffer.end(), resp_str.begin(), resp_str.end());
+		_bytes_sent = 0;
+		_state = WRITING;
+	}
+	// n > 0: 아직 읽을 데이터 있음, CGI_READING_OUTPUT 유지, LT 재발화 대기
 }

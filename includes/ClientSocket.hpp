@@ -45,16 +45,13 @@ class ClientSocket
 		ClientState _state;
 		time_t _last_active_time;
 
-		HttpRequest _request;
-		HttpResponse		_response;
-		RequestHandler		_request_handler;
-		Cgi					_cgi;
+		HttpRequest		_request;
+		HttpResponse	_response;
+		RequestHandler	_request_handler;
+		Cgi*			_cgi;  // RequestHandler가 소유, 여기선 참조용 포인터
 
-		// recv_buffer 파싱 전 단계에서 raw 헤더 값 추출
 		std::string			extractRawHeader(const std::string& key) const;
-		// 파싱 전 단계에서 server block 선택 (Host 헤더 기반)
 		const ServerBlock*	selectServerBlockFromBuffer() const;
-		// 파싱 완료 후 server block 선택 (HttpRequest 헤더 기반)
 		const ServerBlock*	selectServerBlock() const;
 
 		bool				isBodyTooLarge() const;
@@ -72,6 +69,8 @@ class ClientSocket
 
 		int			getFd() const { return _client_fd; }
 		ClientState	getState() const { return _state; }
+		int			getCgiWriteFd() const;
+		int			getCgiReadFd() const;
 
 		void		handleRead();
 		void		handleWrite();
