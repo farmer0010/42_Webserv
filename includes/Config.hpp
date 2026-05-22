@@ -45,8 +45,11 @@ class ServerBlock
 		void init();
 		const Location& getLocationForUri(const std::string& uri) const;
 		void addLocation(const Location& loc) { _locations.push_back(loc); }
-		int getPort() const { return _port; }
-		void setPort(int port) { _port = port; }
+		int			getPort() const { return _port; }
+		void		setPort(int port) { _port = port; }
+		std::string	getHost() const { return _host; }
+		std::string	getServerName() const { return _server_name; }
+		size_t		getClientMaxBodySize() const { return _client_max_body_size; }
 };
 
 class Config
