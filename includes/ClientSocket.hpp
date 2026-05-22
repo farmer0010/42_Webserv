@@ -11,6 +11,7 @@
 # include <string>
 # include <map>
 # include <algorithm>
+# include <cerrno>
 # include <iostream>
 
 # include "HttpRequest.hpp"
@@ -19,7 +20,7 @@
 # include "ServerSocket.hpp"
 # include "Cgi.hpp"
 
-# define RECV_BUFFER_SIZE 8192
+# define RECV_CHUNK_SIZE 8192
 
 enum ClientState {
 	READING,
@@ -34,25 +35,35 @@ enum ClientState {
 class ClientSocket
 {
 	private:
-		int					_client_fd;
-		struct sockaddr_in	_address;
+		int _client_fd;
+		struct sockaddr_in _address;
 		std::vector<const ServerBlock*> _server_blocks;
 
-		std::vector<char>	_recv_buffer;
-		std::vector<char>	_send_buffer;
-		size_t				_bytes_sent;
+		std::vector<char> _recv_buffer;
+		std::vector<char> _send_buffer;
+		size_t _bytes_sent;
 
-		ClientState			_state;
-		time_t				_last_active_time;
+		ClientState _state;
+		time_t _last_active_time;
 
-		HttpRequest			_request;
+		HttpRequest _request;
 		HttpResponse		_response;
 		RequestHandler		_request_handler;
 		Cgi					_cgi;
 
+		// recv_buffer 파싱 전 단계에서 raw 헤더 값 추출
+		std::string			extractRawHeader(const std::string& key) const;
+		// 파싱 전 단계에서 server block 선택 (Host 헤더 기반)
+		const ServerBlock*	selectServerBlockFromBuffer() const;
+		// 파싱 완료 후 server block 선택 (HttpRequest 헤더 기반)
 		const ServerBlock*	selectServerBlock() const;
+
+		bool				isBodyTooLarge() const;
+		void				sendErrorResponse(int status_code);
 		void				processRequest();
 		bool				isRequestComplete() const;
+		bool				isKeepAlive() const;
+		void				resetForKeepAlive();
 
 	public:
 		ClientSocket();

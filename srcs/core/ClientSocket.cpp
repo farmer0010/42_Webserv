@@ -20,6 +20,8 @@ void ClientSocket::init(int client_fd, struct sockaddr_in address, ServerSocket*
 	_last_active_time = time(NULL);
 }
 
+// ─── 헤더 파싱 헬퍼 ──────────────────────────────────────────────────────────
+
 bool ClientSocket::isHeaderComplete() const
 {
 	const char* crlf = "\r\n\r\n";
@@ -27,31 +29,41 @@ bool ClientSocket::isHeaderComplete() const
 		!= _recv_buffer.end();
 }
 
-bool ClientSocket::isRequestComplete() const
+// recv_buffer의 raw 헤더 영역에서 특정 헤더 값을 추출 (파싱 전 단계에서 사용)
+std::string ClientSocket::extractRawHeader(const std::string& key) const
 {
-	if (!isHeaderComplete())
-		return false;
-
 	const char* crlf = "\r\n\r\n";
 	std::vector<char>::const_iterator header_end =
 		std::search(_recv_buffer.begin(), _recv_buffer.end(), crlf, crlf + 4);
-	size_t header_size = static_cast<size_t>(header_end - _recv_buffer.begin()) + 4;
 
-	// 헤더에서 Content-Length 직접 탐색
 	std::string header_str(_recv_buffer.begin(), header_end);
-	const std::string key = "Content-Length: ";
-	size_t pos = header_str.find(key);
+	std::string search_key = key + ": ";
+	size_t pos = header_str.find(search_key);
 	if (pos == std::string::npos)
-		return true; // body 없는 메서드 (GET, DELETE 등)
-
-	size_t value_end = header_str.find("\r\n", pos + key.size());
-	size_t content_length = static_cast<size_t>(
-		std::atoi(header_str.substr(pos + key.size(), value_end - pos - key.size()).c_str()));
-
-	return (_recv_buffer.size() - header_size) >= content_length;
+		return "";
+	size_t end = header_str.find("\r\n", pos + search_key.size());
+	return header_str.substr(pos + search_key.size(), end - pos - search_key.size());
 }
 
-// Host 헤더를 서버 블록의 server_name과 매칭, 없으면 첫 번째 블록(default) 반환
+// 파싱 전: recv_buffer의 Host 헤더로 서버 블록 선택
+const ServerBlock* ClientSocket::selectServerBlockFromBuffer() const
+{
+	if (_server_blocks.empty())
+		return NULL;
+
+	std::string host = extractRawHeader("Host");
+	size_t colon = host.find(':');
+	if (colon != std::string::npos)
+		host = host.substr(0, colon);
+
+	for (size_t i = 0; i < _server_blocks.size(); ++i) {
+		if (_server_blocks[i]->getServerName() == host)
+			return _server_blocks[i];
+	}
+	return _server_blocks[0];
+}
+
+// 파싱 후: HttpRequest의 Host 헤더로 서버 블록 선택
 const ServerBlock* ClientSocket::selectServerBlock() const
 {
 	if (_server_blocks.empty())
@@ -74,33 +86,86 @@ const ServerBlock* ClientSocket::selectServerBlock() const
 	return _server_blocks[0];
 }
 
-void ClientSocket::handleRead()
+// ─── body 크기 제한 ──────────────────────────────────────────────────────────
+
+bool ClientSocket::isRequestComplete() const
 {
-	char buf[RECV_BUFFER_SIZE];
-	ssize_t n = recv(_client_fd, buf, sizeof(buf), 0);
+	if (!isHeaderComplete())
+		return false;
 
-	if (n <= 0) {
-		_state = DONE;
-		return;
-	}
-	_recv_buffer.insert(_recv_buffer.end(), buf, buf + n);
-	_last_active_time = time(NULL);
+	const char* crlf = "\r\n\r\n";
+	std::vector<char>::const_iterator header_end =
+		std::search(_recv_buffer.begin(), _recv_buffer.end(), crlf, crlf + 4);
+	size_t header_size = static_cast<size_t>(header_end - _recv_buffer.begin()) + 4;
 
-	if (!isRequestComplete())
-		return;
+	std::string cl_str = extractRawHeader("Content-Length");
+	if (cl_str.empty())
+		return true; // body 없는 메서드 (GET, DELETE 등)
 
-	_state = PROCESSING;
-	processRequest();
+	size_t content_length = static_cast<size_t>(std::atoi(cl_str.c_str()));
+	return (_recv_buffer.size() - header_size) >= content_length;
 }
+
+// nginx 방식: Content-Length만 봐도 초과면 즉시 차단, 누적 크기도 체크
+bool ClientSocket::isBodyTooLarge() const
+{
+	const ServerBlock* block = selectServerBlockFromBuffer();
+	if (!block)
+		return false;
+
+	size_t max_size = block->getClientMaxBodySize();
+	if (max_size == 0)
+		return false; // 0 = 제한 없음
+
+	// Content-Length 헤더값으로 선제 차단 (body가 오기 전에도 탐지)
+	std::string cl_str = extractRawHeader("Content-Length");
+	if (!cl_str.empty()) {
+		size_t content_length = static_cast<size_t>(std::atoi(cl_str.c_str()));
+		if (content_length > max_size)
+			return true;
+	}
+
+	// 실제 누적된 body 크기 체크 (chunked 등 Content-Length 없는 경우 대비)
+	const char* crlf = "\r\n\r\n";
+	std::vector<char>::const_iterator header_end =
+		std::search(_recv_buffer.begin(), _recv_buffer.end(), crlf, crlf + 4);
+	size_t header_size = static_cast<size_t>(header_end - _recv_buffer.begin()) + 4;
+	size_t body_size = (_recv_buffer.size() > header_size) ? _recv_buffer.size() - header_size : 0;
+
+	return body_size > max_size;
+}
+
+// ─── 에러 응답 ───────────────────────────────────────────────────────────────
+
+// nginx처럼 413 전송 후 Connection: close로 연결 종료
+void ClientSocket::sendErrorResponse(int status_code)
+{
+	_response.init();
+	_response.setVersion("HTTP/1.1");
+	_response.setStatusCode(status_code);
+	if (status_code == 413)
+		_response.setReasonPhrase("Request Entity Too Large");
+	_response.addHeader("Connection", "close");
+	_response.addHeader("Content-Length", "0");
+
+	std::string resp_str = _response.buildResponse();
+	_send_buffer.clear();
+	_send_buffer.insert(_send_buffer.end(), resp_str.begin(), resp_str.end());
+	_bytes_sent = 0;
+	_state = WRITING;
+}
+
+// ─── 요청 처리 ───────────────────────────────────────────────────────────────
 
 void ClientSocket::processRequest()
 {
 	if (!_request.parse(_recv_buffer)) {
-		_state = DONE;
+		sendErrorResponse(400);
 		return;
 	}
 
-	// server_name 기반으로 알맞은 서버 블록 선택 (선택 결과는 향후 RequestHandler에 전달 예정)
+	// 파싱 완료 후 server_name 기반으로 서버 블록 선택
+	// (향후 RequestHandler에 ServerBlock을 전달해 Location 매칭에 활용)
 	(void)selectServerBlock();
 
 	_request_handler.init(_request);
@@ -117,24 +182,89 @@ void ClientSocket::processRequest()
 	_state = WRITING;
 }
 
-void ClientSocket::handleWrite()
-{
-	if (_bytes_sent >= _send_buffer.size()) {
-		_state = DONE;
-		return;
-	}
+// ─── Keep-Alive ──────────────────────────────────────────────────────────────
 
-	ssize_t n = send(_client_fd,
-					 _send_buffer.data() + _bytes_sent,
-					 _send_buffer.size() - _bytes_sent,
-					 0);
+// HTTP/1.1 기본은 keep-alive, HTTP/1.0 기본은 close
+bool ClientSocket::isKeepAlive() const
+{
+	const std::map<std::string, std::string>& headers = _request.getHeaders();
+	std::map<std::string, std::string>::const_iterator it = headers.find("Connection");
+
+	if (it != headers.end())
+		return it->second != "close";
+	return _request.getVersion() == "HTTP/1.1";
+}
+
+// keep-alive 재사용을 위해 요청/응답 상태 초기화, 소켓과 server_blocks는 유지
+void ClientSocket::resetForKeepAlive()
+{
+	_recv_buffer.clear();
+	_send_buffer.clear();
+	_bytes_sent = 0;
+	_request = HttpRequest();
+	_response = HttpResponse();
+	_last_active_time = time(NULL);
+	_state = READING;
+}
+
+// ─── epoll 이벤트 핸들러 ─────────────────────────────────────────────────────
+
+// LT 모드: 1회 recv 후 반환, 데이터가 남아 있으면 epoll이 재발화
+void ClientSocket::handleRead()
+{
+	char buf[RECV_CHUNK_SIZE];
+	ssize_t n = recv(_client_fd, buf, sizeof(buf), 0);
+
 	if (n < 0) {
 		_state = DONE;
 		return;
 	}
-	_bytes_sent += n;
+	if (n == 0) {
+		_state = DONE; // 클라이언트가 연결 종료
+		return;
+	}
 
-	if (_bytes_sent >= _send_buffer.size())
+	_recv_buffer.insert(_recv_buffer.end(), buf, buf + n);
+	_last_active_time = time(NULL);
+
+	if (!isHeaderComplete())
+		return;
+
+	// 헤더 완성 직후부터 body 크기 제한 적용
+	// Content-Length가 max를 넘으면 body가 오기 전에도 413 반환
+	if (isBodyTooLarge()) {
+		sendErrorResponse(413);
+		return;
+	}
+
+	if (!isRequestComplete())
+		return;
+
+	_state = PROCESSING;
+	processRequest();
+}
+
+// send_buffer를 한 이벤트에 최대한 전송, 완료 후 keep-alive 여부에 따라 분기
+void ClientSocket::handleWrite()
+{
+	while (_bytes_sent < _send_buffer.size()) {
+		ssize_t n = send(_client_fd,
+						 _send_buffer.data() + _bytes_sent,
+						 _send_buffer.size() - _bytes_sent,
+						 0);
+		if (n < 0) {
+			if (errno == EAGAIN || errno == EWOULDBLOCK)
+				return; // 커널 송신 버퍼 가득 참, 다음 EPOLLOUT 대기
+			_state = DONE;
+			return;
+		}
+		_bytes_sent += n;
+	}
+
+	// 모든 데이터 전송 완료
+	if (isKeepAlive())
+		resetForKeepAlive(); // → state = READING, dispatchEvents가 EPOLLIN으로 전환
+	else
 		_state = DONE;
 }
 

@@ -41,7 +41,7 @@ void ServerManager::init(const Config& config)
 		}
 	}
 
-	// 서버 소켓을 epoll에 등록 (읽기 이벤트)
+	// 서버 소켓을 epoll에 등록
 	for (std::map<int, ServerSocket*>::iterator sit = _servers.begin(); sit != _servers.end(); ++sit) {
 		struct epoll_event event;
 		event.events = EPOLLIN;
@@ -84,7 +84,7 @@ void ServerManager::handleAccept(int server_fd)
 	_clients[client_fd] = client;
 
 	struct epoll_event event;
-	event.events = EPOLLIN | EPOLLET;
+	event.events = EPOLLIN;
 	event.data.fd = client_fd;
 	if (epoll_ctl(_epoll_fd, EPOLL_CTL_ADD, client_fd, &event) < 0) {
 		delete client;
@@ -131,7 +131,9 @@ void ServerManager::dispatchEvents(int fd, uint32_t evs)
 
 		ClientState state = client->getState();
 		if (state == WRITING)
-			setEpollEvents(fd, EPOLLOUT | EPOLLET);
+			setEpollEvents(fd, EPOLLOUT);
+		else if (state == READING)   // keep-alive: 응답 완료 후 다음 요청 대기
+			setEpollEvents(fd, EPOLLIN);
 		else if (state == DONE)
 			removeClient(fd);
 	}

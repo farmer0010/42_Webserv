@@ -6,6 +6,7 @@
 # include "ClientSocket.hpp"
 
 # include <sys/epoll.h>
+# include <cerrno>
 # include <map>
 
 # define MAX_EVENTS 1024
