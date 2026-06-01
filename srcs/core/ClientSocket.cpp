@@ -225,7 +225,7 @@ void ClientSocket::handleRead()
 	}
 
 	_recv_buffer.insert(_recv_buffer.end(), buf, buf + n);
-	_last_act ive_time = time(NULL);
+	_last_active_time = time(NULL);
 
 	if (!isHeaderComplete())
 		return;

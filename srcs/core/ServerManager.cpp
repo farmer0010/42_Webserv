@@ -99,9 +99,16 @@ void ServerManager::removeClient(int client_fd)
 	_clients.erase(client_fd);
 }
 
-// CGI 파이프 fd를 epoll에 등록하고 _cgi_to_client 맵에 기록
+// CGI 파이프 fd를 non-blocking으로 설정 후 epoll에 등록
+// 클라이언트 fd와 동일하게 O_NONBLOCK 필수 — blocking 파이프는 epoll과 함께 쓸 수 없음
 void ServerManager::addCgiFd(int cgi_fd, int client_fd, uint32_t events)
 {
+	int flags = fcntl(cgi_fd, F_GETFL, 0);
+	if (flags < 0 || fcntl(cgi_fd, F_SETFL, flags | O_NONBLOCK) < 0) {
+		close(cgi_fd);
+		return;
+	}
+
 	struct epoll_event event;
 	event.events = events;
 	event.data.fd = cgi_fd;
