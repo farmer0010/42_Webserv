@@ -12,9 +12,6 @@
 RequestHandler::RequestHandler() : cgi(NULL), _server_config(NULL) {
 }
 
-RequestHandler::RequestHandler(const ServerBlock& Config) : cgi(NULL), _server_config(&Config) {
-}
-
 RequestHandler::~RequestHandler() {
 }
 
