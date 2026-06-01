@@ -90,14 +90,17 @@ const ServerBlock* ClientSocket::selectServerBlock() const
 
 bool ClientSocket::isRequestComplete() const
 {
+	const char* crlf = "\r\n\r\n";
+	std::vector<char>::const_iterator header_end;
+
 	if (!isHeaderComplete())
 		return false;
-
-	const char* crlf = "\r\n\r\n";
-	std::vector<char>::const_iterator header_end =
-		std::search(_recv_buffer.begin(), _recv_buffer.end(), crlf, crlf + 4);
+	//recv 버퍼에서 header 끝 위치 찾기
+	header_end = std::search(_recv_buffer.begin(), _recv_buffer.end(), crlf, crlf + 4);
+	//recv 버퍼에서 header가 차지하는 사이즈 계산
 	size_t header_size = static_cast<size_t>(header_end - _recv_buffer.begin()) + 4;
 
+	//
 	std::string cl_str = extractRawHeader("Content-Length");
 	if (cl_str.empty())
 		return true; // body 없는 메서드 (GET, DELETE 등)
