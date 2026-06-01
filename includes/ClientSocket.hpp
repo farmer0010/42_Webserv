@@ -71,6 +71,7 @@ class ClientSocket
 		ClientState	getState() const { return _state; }
 		int			getCgiWriteFd() const;
 		int			getCgiReadFd() const;
+		pid_t		getCgiPid() const;
 
 		void		handleRead();
 		void		handleWrite();

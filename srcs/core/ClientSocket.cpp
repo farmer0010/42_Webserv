@@ -70,7 +70,7 @@ const ServerBlock* ClientSocket::selectServerBlock() const
 		return NULL;
 
 	const std::map<std::string, std::string>& headers = _request.getHeaders();
-	std::map<std::string, std::string>::const_iterator it = headers.find("Host");
+	std::map<std::string, std::string>::const_iterator it = headers.find("host");
 	if (it == headers.end())
 		return _server_blocks[0];
 
@@ -191,10 +191,14 @@ void ClientSocket::processRequest()
 bool ClientSocket::isKeepAlive() const
 {
 	const std::map<std::string, std::string>& headers = _request.getHeaders();
-	std::map<std::string, std::string>::const_iterator it = headers.find("Connection");
+	std::map<std::string, std::string>::const_iterator it = headers.find("connection");
 
-	if (it != headers.end())
-		return it->second != "close";
+	if (it != headers.end()) {
+		std::string value = it->second;
+		for (size_t i = 0; i < value.size(); ++i)
+			value[i] = std::tolower(value[i]);
+		return value != "close";
+	}
 	return _request.getVersion() == "HTTP/1.1";
 }
 
@@ -213,8 +217,12 @@ void ClientSocket::resetForKeepAlive()
 // ─── epoll 이벤트 핸들러 ─────────────────────────────────────────────────────
 
 // LT 모드: 1회 recv 후 반환, 데이터가 남아 있으면 epoll이 재발화
+// PROCESSING/CGI_*/WRITING 상태에서 EPOLLIN이 잔여 발화되어도 무시
+// (요청 처리 중 추가 read를 막아 동일 요청 중복 처리 방지)
 void ClientSocket::handleRead()
 {
+	if (_state != READING)
+		return;
 	char buf[RECV_CHUNK_SIZE];
 	ssize_t n = recv(_client_fd, buf, sizeof(buf), 0);
 
@@ -281,6 +289,12 @@ int ClientSocket::getCgiReadFd() const
 {
 	Cgi* cgi = _request_handler.getCgi();
 	return cgi ? cgi->getReadFd() : -1;
+}
+
+pid_t ClientSocket::getCgiPid() const
+{
+	Cgi* cgi = _request_handler.getCgi();
+	return cgi ? cgi->getPid() : -1;
 }
 
 // LT 모드: EPOLLOUT 발화 시 POST body를 CGI stdin에 1회 전송

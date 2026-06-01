@@ -1,5 +1,7 @@
 #include "ServerManager.hpp"
 
+#include <sys/wait.h>
+
 ServerManager::ServerManager() : _epoll_fd(-1)
 {
 }
@@ -171,9 +173,16 @@ void ServerManager::dispatchEvents(int fd, uint32_t evs)
 		} else if (state == WRITING) {
 			// CGI 출력 수신 완료: read pipe fd 제거, 클라이언트 fd를 EPOLLOUT으로 전환
 			removeCgi(fd);
+			// CGI 정상 종료(EOF) 시점: 자식 회수
+			pid_t pid = client->getCgiPid();
+			if (pid > 0)
+				waitpid(pid, NULL, WNOHANG);
 			setEpollEvents(client_fd, EPOLLOUT);
 		} else if (state == DONE) {
 			removeCgi(fd);
+			pid_t pid = client->getCgiPid();
+			if (pid > 0)
+				waitpid(pid, NULL, WNOHANG);
 			removeClient(client_fd);
 		}
 		return;
@@ -189,6 +198,10 @@ void ServerManager::dispatchEvents(int fd, uint32_t evs)
 			int read_fd  = client->getCgiReadFd();
 			if (write_fd >= 0 && _cgi_to_client.count(write_fd)) removeCgi(write_fd);
 			if (read_fd  >= 0 && _cgi_to_client.count(read_fd))  removeCgi(read_fd);
+			// 좀비 방지: 자식이 살아있으면 WNOHANG으로 한 번 시도
+			pid_t pid = client->getCgiPid();
+			if (pid > 0)
+				waitpid(pid, NULL, WNOHANG);
 			removeClient(fd);
 			return;
 		}
