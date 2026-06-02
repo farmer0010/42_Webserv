@@ -13,16 +13,23 @@ int main(int argc, char* argv[])
 	// 클라이언트가 먼저 끊은 직후 send() 호출 시 SIGPIPE로 프로세스가 종료되는 것을 방지
 	std::signal(SIGPIPE, SIG_IGN);
 	const char* config_path = (argc == 2) ? argv[1] : "conf/default.conf";
+
+	Config config;
 	try {
 		ConfigParser parser;
 		parser.init(config_path);
-		Config config = parser.parse();
+		config = parser.parse();
+	} catch (const std::exception& e) {
+		std::cerr << "[Config Error] " << config_path << ": " << e.what() << std::endl;
+		return 1;
+	}
 
+	try {
 		ServerManager manager;
 		manager.init(config);
 		manager.run();
 	} catch (const std::exception& e) {
-		std::cerr << "Error: " << e.what() << std::endl;
+		std::cerr << "[Runtime Error] " << e.what() << std::endl;
 		return 1;
 	}
 	return 0;
