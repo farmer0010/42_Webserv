@@ -6,6 +6,7 @@
 #include <vector>
 #include <map>
 #include <fcntl.h>
+#include <sys/types.h>
 
 class Cgi
 {
