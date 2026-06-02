@@ -9,16 +9,23 @@ int main(int argc, char* argv[])
 		return 1;
 	}
 	const char* config_path = (argc == 2) ? argv[1] : "conf/default.conf";
+
+	Config config;
 	try {
 		ConfigParser parser;
 		parser.init(config_path);
-		Config config = parser.parse();
+		config = parser.parse();
+	} catch (const std::exception& e) {
+		std::cerr << "[Config Error] " << config_path << ": " << e.what() << std::endl;
+		return 1;
+	}
 
+	try {
 		ServerManager manager;
 		manager.init(config);
 		manager.run();
 	} catch (const std::exception& e) {
-		std::cerr << "Error: " << e.what() << std::endl;
+		std::cerr << "[Runtime Error] " << e.what() << std::endl;
 		return 1;
 	}
 	return 0;
