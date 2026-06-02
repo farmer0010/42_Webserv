@@ -15,12 +15,12 @@ class ConfigParser
 	private:
 		std::string _file_path;
 		std::vector<std::string> _tokens;
-		void readFile();
+		std::string readFile();
 		void tokenize(const std::string& content);
 	public:
 		ConfigParser();
 		~ConfigParser();
-		void init();
+		void init(const std::string& path);
 		Config parse();
 };
 

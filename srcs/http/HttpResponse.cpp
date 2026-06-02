@@ -16,8 +16,21 @@ void HttpResponse::setVersion(const std::string& version){
     this->version = version;
 }
 
-void HttpResponse::setStatusCode(int status_code){
+void HttpResponse::setStatusCode(int status_code) {
     this->status_code = status_code;
+    
+    switch (status_code) {
+        case 200: this->reason_phrase = "OK"; break;
+        case 201: this->reason_phrase = "Created"; break;
+        case 204: this->reason_phrase = "No Content"; break;
+        case 400: this->reason_phrase = "Bad Request"; break;
+        case 403: this->reason_phrase = "Forbidden"; break;
+        case 404: this->reason_phrase = "Not Found"; break;
+        case 405: this->reason_phrase = "Method Not Allowed"; break;
+        case 413: this->reason_phrase = "Payload Too Large"; break;
+        case 500: this->reason_phrase = "Internal Server Error"; break;
+        default:  this->reason_phrase = "Unknown"; break;
+    }
 }
 
 void HttpResponse::setReasonPhrase(const std::string& reason_phrase){

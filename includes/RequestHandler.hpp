@@ -19,6 +19,7 @@ private:
     std::string absolute_path;
 
     Cgi* cgi;
+    const ServerBlock* _server_config; 
 
     void handleGet();
     void handlePost();
@@ -30,19 +31,17 @@ private:
 
     std::string getMimeType(const std::string& path);
 
-    const ServerBlock* _server_config; //서버 설정 저장
 public:
-    RequestHandler(); 
-    RequestHandler(const ServerBlock& Config); // 생성자에 설정 주입
+    RequestHandler();
     ~RequestHandler();
 
-    void init(const HttpRequest& req);
+    void init(const HttpRequest& req, const ServerBlock* config);
 
     HttpResponse processRequest();
     void handleCgiResponse(const std::vector<char>& cgi_result);
 
-    Cgi* getCgi() const {return cgi;}
-    HttpRequest handleCgiResponse(const HttpRequest& request);
+    Cgi* getCgi() const { return cgi; }
+    HttpResponse getResponse() const { return response; } 
 };
 
 #endif
