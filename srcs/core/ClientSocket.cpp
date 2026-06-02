@@ -100,7 +100,25 @@ bool ClientSocket::isRequestComplete() const
 	//recv 버퍼에서 header가 차지하는 사이즈 계산
 	size_t header_size = static_cast<size_t>(header_end - _recv_buffer.begin()) + 4;
 
-	//
+	// Transfer-Encoding: chunked 인 경우 종결 마커 "0\r\n\r\n" 까지 받아야 완료
+	// (Content-Length가 없어도 즉시 완료로 판정해서 body가 일부만 RequestHandler/CGI로
+	//  넘어가던 문제 차단)
+	std::string te = extractRawHeader("Transfer-Encoding");
+	for (size_t i = 0; i < te.size(); ++i)
+		te[i] = std::tolower(te[i]);
+	if (te.find("chunked") != std::string::npos) {
+		std::vector<char>::const_iterator body_begin = _recv_buffer.begin() + header_size;
+		const char* tail = "\r\n0\r\n\r\n";
+		if (std::search(body_begin, _recv_buffer.end(), tail, tail + 7) != _recv_buffer.end())
+			return true;
+		// 첫 청크가 즉시 0인 케이스 (희귀): body 시작이 "0\r\n\r\n"
+		const char* head_zero = "0\r\n\r\n";
+		if (static_cast<size_t>(_recv_buffer.end() - body_begin) >= 5 &&
+			std::equal(body_begin, body_begin + 5, head_zero))
+			return true;
+		return false;
+	}
+
 	std::string cl_str = extractRawHeader("Content-Length");
 	if (cl_str.empty())
 		return true; // body 없는 메서드 (GET, DELETE 등)
