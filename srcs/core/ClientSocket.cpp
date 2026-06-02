@@ -1,6 +1,6 @@
 #include "ClientSocket.hpp"
 
-ClientSocket::ClientSocket() : _client_fd(-1), _bytes_sent(0), _state(READING), _last_active_time(0), _cgi(NULL)
+ClientSocket::ClientSocket() : _client_fd(-1), _bytes_sent(0), _state(READING), _last_active_time(0)
 {
 }
 
@@ -203,6 +203,8 @@ bool ClientSocket::isKeepAlive() const
 }
 
 // keep-alive 재사용을 위해 요청/응답 상태 초기화, 소켓과 server_blocks는 유지
+// _request_handler도 재생성: 이전 요청의 cgi 포인터/내부 상태가 남아 다음
+// CGI 요청에서 누수/dangling pipe fd로 이어지는 것을 차단
 void ClientSocket::resetForKeepAlive()
 {
 	_recv_buffer.clear();
@@ -210,6 +212,7 @@ void ClientSocket::resetForKeepAlive()
 	_bytes_sent = 0;
 	_request = HttpRequest();
 	_response = HttpResponse();
+	_request_handler = RequestHandler();
 	_last_active_time = time(NULL);
 	_state = READING;
 }

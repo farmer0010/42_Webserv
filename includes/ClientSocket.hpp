@@ -48,7 +48,6 @@ class ClientSocket
 		HttpRequest		_request;
 		HttpResponse	_response;
 		RequestHandler	_request_handler;
-		Cgi*			_cgi;  // RequestHandler가 소유, 여기선 참조용 포인터
 
 		std::string			extractRawHeader(const std::string& key) const;
 		const ServerBlock*	selectServerBlockFromBuffer() const;
