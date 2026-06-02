@@ -1,5 +1,8 @@
 #include "Config.hpp"
 
+Config::Config() {}
+Config::~Config() {}
+
 Location::Location() {}
 Location::~Location() {}
 
@@ -7,7 +10,12 @@ void Location::init() {
 	this->_path = "";
 	this->_root = "";
 	this->_index = "index.html";
+	this->_allow_methods.clear();
+	this->_allow_methods.push_back("GET");
 	this->_autoindex = false;
+	this->_cgi_path = "";
+	this->_cgi_extension = "";
+	this->_return_url = "";
 }
 
 ServerBlock::ServerBlock() {}
@@ -15,8 +23,10 @@ ServerBlock::~ServerBlock() {}
 
 void ServerBlock::init() {
 	this->_port = 80;
+	this->_host = "0.0.0.0";
 	this->_server_name = "";
 	this->_client_max_body_size = 1048576;
+	this->_error_pages.clear();
 	this->_locations.clear();
 }
 
