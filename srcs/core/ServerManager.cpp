@@ -192,25 +192,33 @@ void ServerManager::dispatchEvents(int fd, uint32_t evs)
 	if (_clients.find(fd) != _clients.end()) {
 		ClientSocket* client = _clients[fd];
 
-		if (evs & (EPOLLERR | EPOLLHUP)) {
-			// CGI 실행 중 클라이언트가 끊긴 경우 열린 CGI fd도 함께 정리
-			int write_fd = client->getCgiWriteFd();
-			int read_fd  = client->getCgiReadFd();
-			if (write_fd >= 0 && _cgi_to_client.count(write_fd)) removeCgi(write_fd);
-			if (read_fd  >= 0 && _cgi_to_client.count(read_fd))  removeCgi(read_fd);
-			// 좀비 방지: 자식이 살아있으면 WNOHANG으로 한 번 시도
-			pid_t pid = client->getCgiPid();
-			if (pid > 0)
-				waitpid(pid, NULL, WNOHANG);
-			removeClient(fd);
-			return;
-		}
+		// EPOLLERR / EPOLLHUP 는 peer 종료 신호. 다만 같은 dispatch 에 EPOLLIN 이
+		// 동반된 경우(마지막 요청 직후 FIN) 즉시 종료하면 마지막 요청 데이터를
+		// 드레인하기 전에 닫혀 응답이 못 나간다. 먼저 read/write 를 처리한 뒤,
+		// 더 송신할 게 없을 때만 정리한다. recv == 0 이면 handleRead 가 _state 를
+		// DONE 으로 전이시키므로 정상 흐름에 맡길 수 있음.
+		bool peer_gone = (evs & (EPOLLERR | EPOLLHUP)) != 0;
+
 		if (evs & EPOLLIN)
 			client->handleRead();
 		if (evs & EPOLLOUT)
 			client->handleWrite();
 
 		ClientState state = client->getState();
+
+		// peer 가 닫혔고 송신 잔여가 없으면(또는 에러) 즉시 정리
+		if (peer_gone && state != WRITING) {
+			int write_fd = client->getCgiWriteFd();
+			int read_fd  = client->getCgiReadFd();
+			if (write_fd >= 0 && _cgi_to_client.count(write_fd)) removeCgi(write_fd);
+			if (read_fd  >= 0 && _cgi_to_client.count(read_fd))  removeCgi(read_fd);
+			pid_t pid = client->getCgiPid();
+			if (pid > 0)
+				waitpid(pid, NULL, WNOHANG);
+			removeClient(fd);
+			return;
+		}
+
 		if (state == WRITING)
 			setEpollEvents(fd, EPOLLOUT);
 		else if (state == CGI_WRITING_BODY) {
