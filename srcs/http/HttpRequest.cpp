@@ -49,16 +49,46 @@ bool HttpRequest::parse(const std::vector<char>& raw_data) {
         pos = next_crlf + 2;
     }
 
+    if (this->headers.find("host") == this->headers.end()) {
+        return false;
+    }
+
     std::vector<char>::const_iterator body_start = header_end + 4;
     
     if (this->headers.find("content-length") != this->headers.end()) {
         int content_length = std::atoi(this->headers["content-length"].c_str());
-        
         int available_body_size = raw_data.end() - body_start;
         int copy_size = (available_body_size < content_length) ? available_body_size : content_length;
         
         this->body.assign(body_start, body_start + copy_size);
     } 
+    else if (this->headers.find("transfer-encoding") != this->headers.end() && 
+             this->headers["transfer-encoding"] == "chunked") {
+        
+        std::string raw_body_str(body_start, raw_data.end());
+        size_t chunk_pos = 0;
+        this->body.clear();
+
+        while (chunk_pos < raw_body_str.length()) {
+            size_t size_end = raw_body_str.find("\r\n", chunk_pos);
+            if (size_end == std::string::npos) break;
+
+            std::string size_hex = raw_body_str.substr(chunk_pos, size_end - chunk_pos);
+            char* end_ptr;
+            long chunk_size = std::strtol(size_hex.c_str(), &end_ptr, 16);
+
+            if (chunk_size == 0) break;
+
+            chunk_pos = size_end + 2;
+            
+            if (chunk_pos + chunk_size <= raw_body_str.length()) {
+                this->body.insert(this->body.end(), 
+                                  raw_body_str.begin() + chunk_pos, 
+                                  raw_body_str.begin() + chunk_pos + chunk_size);
+            }
+            chunk_pos += chunk_size + 2;
+        }
+    }
     
     return true;
 }

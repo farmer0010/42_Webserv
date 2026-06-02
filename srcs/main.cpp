@@ -6,15 +6,16 @@
 
 int main(int argc, char* argv[])
 {
-	if (argc != 2) {
-		std::cerr << "Usage: " << argv[0] << " <config_file>" << std::endl;
+	if (argc > 2) {
+		std::cerr << "Usage: " << argv[0] << " [config_file]" << std::endl;
 		return 1;
 	}
 	// 클라이언트가 먼저 끊은 직후 send() 호출 시 SIGPIPE로 프로세스가 종료되는 것을 방지
 	std::signal(SIGPIPE, SIG_IGN);
+	const char* config_path = (argc == 2) ? argv[1] : "conf/default.conf";
 	try {
 		ConfigParser parser;
-		parser.init();
+		parser.init(config_path);
 		Config config = parser.parse();
 
 		ServerManager manager;

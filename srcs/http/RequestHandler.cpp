@@ -10,19 +10,14 @@
 #include <vector>
 
 RequestHandler::RequestHandler() : cgi(NULL), _server_config(NULL) {
-
-}
-
-RequestHandler::RequestHandler(const ServerBlock& Config) : cgi(NULL), _server_config(&Config) {
-
 }
 
 RequestHandler::~RequestHandler() {
-    
 }
 
-void RequestHandler::init(const HttpRequest& req) {
+void RequestHandler::init(const HttpRequest& req, const ServerBlock* config) {
     this->request = req;
+    this->_server_config = config;
     this->response.init();
 
     if (this->_server_config != NULL) {
@@ -33,13 +28,13 @@ void RequestHandler::init(const HttpRequest& req) {
             if (this->absolute_path[this->absolute_path.length() - 1] != '/')
                 this->absolute_path += "/";
             this->absolute_path += loc.getIndex();
-        } else {
-            this->absolute_path = "./html" + this->request.getUri();
-            if (isDirectory(this->absolute_path)) {
-                if (this->absolute_path[this->absolute_path.length() - 1] != '/')
-                    this->absolute_path += "/";
-                this->absolute_path += "index.html";
-            }
+        }
+    } else {
+        this->absolute_path = "./html" + this->request.getUri();
+        if (isDirectory(this->absolute_path)) {
+            if (this->absolute_path[this->absolute_path.length() - 1] != '/')
+                this->absolute_path += "/";
+            this->absolute_path += "index.html";
         }
     }
 }
@@ -61,11 +56,11 @@ HttpResponse RequestHandler::processRequest() {
             return this->response;
         }
 
-        this -> cgi = new Cgi(this-> request, this -> absolute_path);
+        this->cgi = new Cgi(this->request, this->absolute_path);
         
         if (this->cgi->execute() == false) {
-            delete this -> cgi;
-            this -> cgi = NULL;
+            delete this->cgi;
+            this->cgi = NULL;
             generateErrorPage(500);
             return this->response;
         }
