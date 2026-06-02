@@ -20,11 +20,11 @@ SRCS_FILES  = main.cpp \
               core/ServerManager.cpp \
               core/ClientSocket.cpp \
 			  config/ConfigParser.cpp \
-			  config/ServerBlock.cpp
-# 나중에 추가될 파일들 예시:
-#             http/Request.cpp \
-#             http/Response.cpp \
-#             config/ConfigParser.cpp
+			  config/ServerBlock.cpp \
+			  http/HttpRequest.cpp \
+			  http/HttpResponse.cpp \
+			  http/RequestHandler.cpp \
+			  http/Cgi.cpp
 
 # SRCS_FILES 앞부분에 srcs/ 폴더 경로를 붙임
 SRCS        = $(addprefix $(SRCS_DIR)/, $(SRCS_FILES))

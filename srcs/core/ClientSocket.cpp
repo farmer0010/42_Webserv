@@ -167,11 +167,14 @@ void ClientSocket::processRequest()
 		return;
 	}
 
-	// 파싱 완료 후 server_name 기반으로 서버 블록 선택
-	// (향후 RequestHandler에 ServerBlock을 전달해 Location 매칭에 활용)
-	(void)selectServerBlock();
+	// 파싱 완료 후 server_name 기반으로 서버 블록 선택, RequestHandler에 전달
+	const ServerBlock* sb = selectServerBlock();
+	if (!sb) {
+		sendErrorResponse(500);
+		return;
+	}
 
-	_request_handler.init(_request);
+	_request_handler.init(_request, sb);
 	_response = _request_handler.processRequest();
 
 	if (_request_handler.getCgi() != NULL) {
@@ -324,9 +327,10 @@ void ClientSocket::handleCgiRead()
 	if (n < 0) { _state = DONE; return; }
 	if (n == 0) {
 		// CGI 프로세스 종료 → 응답 구성
-		// handleCgiResponse: CGI 출력을 파싱해 RequestHandler 내부 response 갱신
+		// handleCgiResponse가 RequestHandler 내부 response를 채우면
+		// getResponse()로 가져와 _response에 반영해야 buildResponse가 CGI 결과를 직렬화
 		_request_handler.handleCgiResponse(cgi->getResponseBuffer());
-		// TODO: RequestHandler::getResponse() 추가되면 _response를 갱신해야 함
+		_response = _request_handler.getResponse();
 		std::string resp_str = _response.buildResponse();
 		_send_buffer.insert(_send_buffer.end(), resp_str.begin(), resp_str.end());
 		_bytes_sent = 0;
