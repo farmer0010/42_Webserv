@@ -158,14 +158,30 @@ bool ClientSocket::isBodyTooLarge() const
 
 // ─── 에러 응답 ───────────────────────────────────────────────────────────────
 
-// nginx처럼 413 전송 후 Connection: close로 연결 종료
+// nginx처럼 에러 응답 후 Connection: close로 연결 종료
+// 에러 시점에 _recv_buffer에 쌓인 잔여 요청 데이터는 더 이상 처리하지 않으므로
+// 메모리 점유 방지를 위해 비움
 void ClientSocket::sendErrorResponse(int status_code)
 {
+	_recv_buffer.clear();
+
 	_response.init();
 	_response.setVersion("HTTP/1.1");
 	_response.setStatusCode(status_code);
-	if (status_code == 413)
-		_response.setReasonPhrase("Request Entity Too Large");
+
+	const char* phrase = "";
+	switch (status_code) {
+		case 400: phrase = "Bad Request"; break;
+		case 403: phrase = "Forbidden"; break;
+		case 404: phrase = "Not Found"; break;
+		case 405: phrase = "Method Not Allowed"; break;
+		case 413: phrase = "Request Entity Too Large"; break;
+		case 500: phrase = "Internal Server Error"; break;
+		case 501: phrase = "Not Implemented"; break;
+		case 505: phrase = "HTTP Version Not Supported"; break;
+	}
+	_response.setReasonPhrase(phrase);
+
 	_response.addHeader("Connection", "close");
 	_response.addHeader("Content-Length", "0");
 
@@ -181,6 +197,14 @@ void ClientSocket::sendErrorResponse(int status_code)
 void ClientSocket::processRequest()
 {
 	if (!_request.parse(_recv_buffer)) {
+		sendErrorResponse(400);
+		return;
+	}
+
+	// HTTP/1.1은 Host 헤더 필수 (RFC 7230 §5.4). 없으면 400.
+	// 헤더 키는 HttpRequest::parse가 lowercase로 저장하므로 "host"로 조회.
+	if (_request.getVersion() == "HTTP/1.1" &&
+		_request.getHeaders().find("host") == _request.getHeaders().end()) {
 		sendErrorResponse(400);
 		return;
 	}
