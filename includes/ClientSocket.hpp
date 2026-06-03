@@ -50,6 +50,9 @@ class ClientSocket
 		RequestHandler	_request_handler;
 
 		std::string			extractRawHeader(const std::string& key) const;
+		size_t				countRawHeader(const std::string& key) const;
+		bool				parseContentLength(const std::string& cl_str, size_t& out) const;
+		int					validateHeaders() const;
 		const ServerBlock*	selectServerBlockFromBuffer() const;
 		const ServerBlock*	selectServerBlock() const;
 

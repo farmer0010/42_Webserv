@@ -1,5 +1,7 @@
 #include "ClientSocket.hpp"
 
+#include <limits>
+
 ClientSocket::ClientSocket() : _client_fd(-1), _bytes_sent(0), _state(READING), _last_active_time(0)
 {
 }
@@ -43,6 +45,79 @@ std::string ClientSocket::extractRawHeader(const std::string& key) const
 		return "";
 	size_t end = header_str.find("\r\n", pos + search_key.size());
 	return header_str.substr(pos + search_key.size(), end - pos - search_key.size());
+}
+
+// raw 헤더 영역에서 특정 키가 등장한 횟수 (RFC 7230 §3.3.3 중복 검출용).
+// request-line 의 메서드가 우연히 "Content-Length:" 같은 문자열을 가질 수 없으므로
+// 헤더 영역 전체에서 "\r\n" + key + ":" 패턴을 카운트해도 안전.
+size_t ClientSocket::countRawHeader(const std::string& key) const
+{
+	const char* crlf = "\r\n\r\n";
+	std::vector<char>::const_iterator header_end =
+		std::search(_recv_buffer.begin(), _recv_buffer.end(), crlf, crlf + 4);
+	std::string header_str(_recv_buffer.begin(), header_end);
+
+	std::string needle = "\r\n" + key + ":";
+	size_t count = 0;
+	size_t pos = 0;
+	while ((pos = header_str.find(needle, pos)) != std::string::npos) {
+		count++;
+		pos += needle.size();
+	}
+	return count;
+}
+
+// Content-Length 값을 검증하며 size_t 로 파싱.
+// - 앞뒤 공백/탭 허용 (RFC 7230 OWS)
+// - 모든 문자가 ASCII digit 이어야 함 (음수/부호/지수 모두 거부)
+// - 누적 곱셈에서 자체 오버플로 검출 (errno 사용 없이 size_t max 비교)
+// 반환: true 성공 (out 채워짐), false 실패
+bool ClientSocket::parseContentLength(const std::string& cl_str, size_t& out) const
+{
+	if (cl_str.empty())
+		return false;
+	size_t start = 0, end = cl_str.size();
+	while (start < end && (cl_str[start] == ' ' || cl_str[start] == '\t')) start++;
+	while (end > start && (cl_str[end - 1] == ' ' || cl_str[end - 1] == '\t')) end--;
+	if (start == end)
+		return false;
+
+	const size_t max_size = std::numeric_limits<size_t>::max();
+	size_t val = 0;
+	for (size_t i = start; i < end; ++i) {
+		if (cl_str[i] < '0' || cl_str[i] > '9')
+			return false;
+		size_t digit = static_cast<size_t>(cl_str[i] - '0');
+		if (val > (max_size - digit) / 10)
+			return false;
+		val = val * 10 + digit;
+	}
+	out = val;
+	return true;
+}
+
+// 헤더 완성 직후 호출. RFC 7230 §3.3.3 위반 조합/값을 검사.
+// 반환: 0 = OK, 그 외 = HTTP status code (현재 400만 사용)
+int ClientSocket::validateHeaders() const
+{
+	// Content-Length 중복 → 400
+	if (countRawHeader("Content-Length") > 1)
+		return 400;
+
+	std::string cl_str = extractRawHeader("Content-Length");
+	std::string te_str = extractRawHeader("Transfer-Encoding");
+
+	// Content-Length + Transfer-Encoding 동시 → 400 (request smuggling 방지)
+	if (!cl_str.empty() && !te_str.empty())
+		return 400;
+
+	// Content-Length 값이 유효 size_t 인지
+	if (!cl_str.empty()) {
+		size_t dummy;
+		if (!parseContentLength(cl_str, dummy))
+			return 400;
+	}
+	return 0;
 }
 
 // 파싱 전: recv_buffer의 Host 헤더로 서버 블록 선택
@@ -123,7 +198,11 @@ bool ClientSocket::isRequestComplete() const
 	if (cl_str.empty())
 		return true; // body 없는 메서드 (GET, DELETE 등)
 
-	size_t content_length = static_cast<size_t>(std::atoi(cl_str.c_str()));
+	// validateHeaders 가 미리 통과시킨 값이라 실패 케이스는 도달하지 않음.
+	// 방어적으로 실패 시 완료로 처리하여 무한 대기 방지.
+	size_t content_length = 0;
+	if (!parseContentLength(cl_str, content_length))
+		return true;
 	return (_recv_buffer.size() - header_size) >= content_length;
 }
 
@@ -141,8 +220,9 @@ bool ClientSocket::isBodyTooLarge() const
 	// Content-Length 헤더값으로 선제 차단 (body가 오기 전에도 탐지)
 	std::string cl_str = extractRawHeader("Content-Length");
 	if (!cl_str.empty()) {
-		size_t content_length = static_cast<size_t>(std::atoi(cl_str.c_str()));
-		if (content_length > max_size)
+		size_t content_length = 0;
+		// 파싱 실패면 validateHeaders 가 이미 400 처리했거나 처리할 예정 → 여기선 false
+		if (parseContentLength(cl_str, content_length) && content_length > max_size)
 			return true;
 	}
 
@@ -288,6 +368,14 @@ void ClientSocket::handleRead()
 
 	if (!isHeaderComplete())
 		return;
+
+	// 헤더 완성 직후 RFC 7230 §3.3.3 위반 조합/Content-Length 값 검증
+	// (중복 CL / CL+Transfer-Encoding 공존 / 비숫자·오버플로 → 400)
+	int header_err = validateHeaders();
+	if (header_err != 0) {
+		sendErrorResponse(header_err);
+		return;
+	}
 
 	// 헤더 완성 직후부터 body 크기 제한 적용
 	// Content-Length가 max를 넘으면 body가 오기 전에도 413 반환
