@@ -344,9 +344,9 @@ void ClientSocket::resetForKeepAlive()
 	_recv_buffer.clear();
 	_send_buffer.clear();
 	_bytes_sent = 0;
-	_request = HttpRequest();
-	_response = HttpResponse();
-	_request_handler = RequestHandler();
+	_request.clear();
+	_response.clear();
+	_request_handler.clear();
 	_last_active_time = time(NULL);
 	_cgi_start_time = 0;
 	_state = READING;

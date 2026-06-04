@@ -109,35 +109,36 @@ void ServerManager::handleAccept(int server_fd)
 
 void ServerManager::removeClient(int client_fd)
 {
+	std::map<int, ClientSocket*>::iterator it = _clients.find(client_fd);
+	if (it == _clients.end())
+		return;
 	epoll_ctl(_epoll_fd, EPOLL_CTL_DEL, client_fd, NULL);
-	delete _clients[client_fd];
-	_clients.erase(client_fd);
+	delete it->second;
+	_clients.erase(it);
 	std::cout << "[close] client fd=" << client_fd << std::endl;
 }
 
-// CGI 파이프 fd를 non-blocking으로 설정 후 epoll에 등록
-// 클라이언트 fd와 동일하게 O_NONBLOCK 필수 — blocking 파이프는 epoll과 함께 쓸 수 없음
-void ServerManager::addCgiFd(int cgi_fd, int client_fd, uint32_t events)
+// CGI 파이프 fd를 non-blocking으로 설정 후 epoll에 등록.
+// 실패 시 false 반환 — 호출자가 클라이언트를 정리해야 함.
+bool ServerManager::addCgiFd(int cgi_fd, int client_fd, uint32_t events)
 {
 	int flags = fcntl(cgi_fd, F_GETFL, 0);
-	if (flags < 0 || fcntl(cgi_fd, F_SETFL, flags | O_NONBLOCK) < 0) {
-		close(cgi_fd);
-		return;
-	}
+	if (flags < 0 || fcntl(cgi_fd, F_SETFL, flags | O_NONBLOCK) < 0)
+		return false;
 
 	struct epoll_event event;
 	event.events = events;
 	event.data.fd = cgi_fd;
 	if (epoll_ctl(_epoll_fd, EPOLL_CTL_ADD, cgi_fd, &event) < 0)
-		return;
+		return false;
 	_cgi_to_client[cgi_fd] = client_fd;
+	return true;
 }
 
 // CGI 파이프 fd를 epoll에서 제거하고 닫기
 void ServerManager::removeCgi(int cgi_fd)
 {
 	epoll_ctl(_epoll_fd, EPOLL_CTL_DEL, cgi_fd, NULL);
-	close(cgi_fd);
 	_cgi_to_client.erase(cgi_fd);
 }
 
@@ -230,8 +231,13 @@ void ServerManager::dispatchEvents(int fd, uint32_t evs)
 			// write 완료: write pipe fd 제거, read pipe fd 등록
 			removeCgi(fd);
 			int read_fd = client->getCgiReadFd();
-			if (read_fd >= 0)
-				addCgiFd(read_fd, client_fd, EPOLLIN);
+			if (read_fd < 0 || !addCgiFd(read_fd, client_fd, EPOLLIN)) {
+				// read pipe 등록 실패 → 무한 매달림 방지를 위해 즉시 정리
+				std::cerr << "[cgi] addCgiFd(read) failed client_fd=" << client_fd << std::endl;
+				pid_t pid = client->getCgiPid();
+				if (pid > 0) { kill(pid, SIGKILL); waitpid(pid, NULL, 0); }
+				removeClient(client_fd);
+			}
 		} else if (state == WRITING) {
 			// CGI 출력 수신 완료: read pipe fd 제거, 클라이언트 fd를 EPOLLOUT으로 전환
 			removeCgi(fd);
@@ -286,8 +292,15 @@ void ServerManager::dispatchEvents(int fd, uint32_t evs)
 		else if (state == CGI_WRITING_BODY) {
 			// processRequest가 CGI 진입: write pipe fd를 epoll에 등록
 			int write_fd = client->getCgiWriteFd();
-			if (write_fd >= 0)
-				addCgiFd(write_fd, fd, EPOLLOUT);
+			if (write_fd < 0 || !addCgiFd(write_fd, fd, EPOLLOUT)) {
+				// write pipe 등록 실패 → CGI 고아 방지를 위해 즉시 정리
+				std::cerr << "[cgi] addCgiFd(write) failed client_fd=" << fd << std::endl;
+				pid_t pid = client->getCgiPid();
+				if (pid > 0) { kill(pid, SIGKILL); waitpid(pid, NULL, 0); }
+				int read_fd = client->getCgiReadFd();
+				if (read_fd >= 0 && _cgi_to_client.count(read_fd)) removeCgi(read_fd);
+				removeClient(fd);
+			}
 		}
 		else if (state == READING)   // keep-alive
 			setEpollEvents(fd, EPOLLIN);
