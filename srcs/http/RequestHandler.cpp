@@ -157,12 +157,69 @@ void RequestHandler::handleGet() {
 }
 
 void RequestHandler::handlePost() {
-    std::string target_path = this->absolute_path;
+    const std::map<std::string, std::string>& req_headers = this->request.getHeaders();
+    std::map<std::string, std::string>::const_iterator ct_it = req_headers.find("content-type");
+    
+    std::string boundary = "";
+    if (ct_it != req_headers.end()) {
+        std::string ct_value = ct_it->second;
+        size_t b_pos = ct_value.find("boundary=");
+        if (b_pos != std::string::npos) {
+            boundary = ct_value.substr(b_pos + 9);
+        }
+    }
 
+    const std::vector<char>& request_body = this->request.getBody();
+    std::string final_filename = "uploaded_file.bin";
+    std::vector<char>::const_iterator file_data_start = request_body.begin();
+    std::vector<char>::const_iterator file_data_end = request_body.end();
+
+    if (!boundary.empty() && !request_body.empty()) {
+        std::string start_boundary = "--" + boundary;
+        std::string end_boundary = "--" + boundary + "--";
+
+        std::vector<char>::const_iterator part_start = std::search(
+            request_body.begin(), request_body.end(),
+            start_boundary.begin(), start_boundary.end()
+        );
+
+        if (part_start != request_body.end()) {
+            std::vector<char>::const_iterator search_start = part_start + start_boundary.length();
+            const char crlf2[] = "\r\n\r\n";
+            std::vector<char>::const_iterator part_header_end = std::search(
+                search_start, request_body.end(),
+                crlf2, crlf2 + 4
+            );
+
+            if (part_header_end != request_body.end()) {
+                std::string part_header_str(search_start, part_header_end);
+                size_t fn_pos = part_header_str.find("filename=\"");
+                if (fn_pos != std::string::npos) {
+                    size_t fn_end = part_header_str.find("\"", fn_pos + 10);
+                    if (fn_end != std::string::npos) {
+                        final_filename = part_header_str.substr(fn_pos + 10, fn_end - (fn_pos + 10));
+                    }
+                }
+
+                file_data_start = part_header_end + 4;
+
+                std::string delim = "\r\n--" + boundary;
+                std::vector<char>::const_iterator part_data_end = std::search(
+                    file_data_start, request_body.end(),
+                    delim.begin(), delim.end()
+                );
+                if (part_data_end != request_body.end()) {
+                    file_data_end = part_data_end;
+                }
+            }
+        }
+    }
+
+    std::string target_path = this->absolute_path;
     if (isDirectory(target_path)) {
         if (target_path[target_path.length() - 1] != '/')
             target_path += "/";
-        target_path += "uploaded_file.bin"; 
+        target_path += final_filename; 
     }
 
     std::ofstream file(target_path.c_str(), std::ios::binary);
@@ -170,14 +227,15 @@ void RequestHandler::handlePost() {
         generateErrorPage(500);
         return;
     }
-    const std::vector<char>& request_body = this->request.getBody();
-    if (!request_body.empty()) {
-        file.write(&request_body[0], request_body.size());
+
+    if (file_data_start < file_data_end) {
+        file.write(&*file_data_start, file_data_end - file_data_start);
     }
     file.close();
+
     this->response.setStatusCode(201);
     this->response.setReasonPhrase("Created");
-    this->response.setBody("<h1>File Uploaded</h1>");
+    this->response.setBody("<h1>File Uploaded Successfully!</h1><p>Saved as: " + final_filename + "</p>");
 }
 
 void RequestHandler::handleDelete() {
