@@ -4,6 +4,8 @@
 #include <csignal>
 #include <ctime>
 #include <vector>
+#include <iostream>
+#include <arpa/inet.h>
 
 ServerManager::ServerManager() : _epoll_fd(-1)
 {
@@ -94,9 +96,15 @@ void ServerManager::handleAccept(int server_fd)
 	event.events = EPOLLIN;
 	event.data.fd = client_fd;
 	if (epoll_ctl(_epoll_fd, EPOLL_CTL_ADD, client_fd, &event) < 0) {
+		std::cerr << "[epoll_ctl] ADD failed fd=" << client_fd << std::endl;
 		delete client;
 		_clients.erase(client_fd);
+		return;
 	}
+
+	std::cout << "[accept] fd=" << client_fd
+			  << " from " << inet_ntoa(client_addr.sin_addr)
+			  << ":" << ntohs(client_addr.sin_port) << std::endl;
 }
 
 void ServerManager::removeClient(int client_fd)
@@ -104,6 +112,7 @@ void ServerManager::removeClient(int client_fd)
 	epoll_ctl(_epoll_fd, EPOLL_CTL_DEL, client_fd, NULL);
 	delete _clients[client_fd];
 	_clients.erase(client_fd);
+	std::cout << "[close] client fd=" << client_fd << std::endl;
 }
 
 // CGI 파이프 fd를 non-blocking으로 설정 후 epoll에 등록
@@ -168,6 +177,11 @@ void ServerManager::sweepTimeouts()
 		if (it == _clients.end())
 			continue;
 		ClientSocket* client = it->second;
+
+		bool cgi_expired = client->getCgiStartTime() > 0 &&
+						   (now - client->getCgiStartTime()) > CGI_TIMEOUT;
+		std::cerr << "[timeout] fd=" << fd
+				  << (cgi_expired ? " (cgi)" : " (idle)") << std::endl;
 
 		// CGI 가 살아있으면 SIGKILL 로 강제 종료 후 회수
 		pid_t pid = client->getCgiPid();
