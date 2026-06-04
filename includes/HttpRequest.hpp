@@ -19,6 +19,7 @@ class HttpRequest
         ~HttpRequest(){};
 
         bool parse(const std::vector<char>& raw_data);
+        void clear();
 
         std::string getMethod() const { return this->method; }
         std::string getUri() const { return this->uri; }

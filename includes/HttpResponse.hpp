@@ -30,6 +30,8 @@ class HttpResponse
         void setBody(const std::vector<char>& body);
         void setBody(const std::string& body);
 
+        void clear();
+
         std::string buildResponse() const;
 };
 

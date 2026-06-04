@@ -41,7 +41,8 @@ public:
     void handleCgiResponse(const std::vector<char>& cgi_result);
 
     Cgi* getCgi() const { return cgi; }
-    HttpResponse getResponse() const { return response; } 
+    HttpResponse getResponse() const { return response; }
+    void clear();
 };
 
 #endif
