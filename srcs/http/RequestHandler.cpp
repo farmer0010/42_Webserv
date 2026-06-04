@@ -27,8 +27,7 @@ void RequestHandler::init(const HttpRequest& req, const ServerBlock* config) {
 
     if (this->_server_config != NULL) {
         const Location& loc = this->_server_config->getLocationForUri(this->request.getUri());
-        std::string relative_uri = this->request.getUri().substr(loc.getPath().length());
-        this->absolute_path = loc.getRoot() + relative_uri;
+        this->absolute_path = loc.getRoot() + this->request.getUri();
 
         if (this->request.getMethod() == "GET" && isDirectory(this->absolute_path)) {
             if (this->absolute_path[this->absolute_path.length() - 1] != '/')
