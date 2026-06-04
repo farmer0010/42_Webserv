@@ -2,7 +2,7 @@
 
 #include <limits>
 
-ClientSocket::ClientSocket() : _client_fd(-1), _bytes_sent(0), _state(READING), _last_active_time(0)
+ClientSocket::ClientSocket() : _client_fd(-1), _bytes_sent(0), _state(READING), _last_active_time(0), _cgi_start_time(0)
 {
 }
 
@@ -20,6 +20,7 @@ void ClientSocket::init(int client_fd, struct sockaddr_in address, ServerSocket*
 	_bytes_sent = 0;
 	_state = READING;
 	_last_active_time = time(NULL);
+	_cgi_start_time = 0;
 }
 
 // ─── 헤더 파싱 헬퍼 ──────────────────────────────────────────────────────────
@@ -300,6 +301,7 @@ void ClientSocket::processRequest()
 	_response = _request_handler.processRequest();
 
 	if (_request_handler.getCgi() != NULL) {
+		_cgi_start_time = time(NULL);
 		_state = CGI_WRITING_BODY;
 		return;
 	}
@@ -339,6 +341,7 @@ void ClientSocket::resetForKeepAlive()
 	_response = HttpResponse();
 	_request_handler = RequestHandler();
 	_last_active_time = time(NULL);
+	_cgi_start_time = 0;
 	_state = READING;
 }
 
@@ -405,6 +408,7 @@ void ClientSocket::handleWrite()
 		return;
 	}
 	_bytes_sent += n;
+	_last_active_time = time(NULL);
 
 	if (_bytes_sent >= _send_buffer.size()) {
 		if (isKeepAlive())
@@ -442,6 +446,7 @@ void ClientSocket::handleCgiWrite()
 
 	ssize_t n = cgi->writeToPipe();
 	if (n < 0) { _state = DONE; return; }
+	_last_active_time = time(NULL);
 	if (n == 0)
 		_state = CGI_READING_OUTPUT; // body 전송 완료 → 결과 읽기 단계로
 }
@@ -455,6 +460,7 @@ void ClientSocket::handleCgiRead()
 
 	ssize_t n = cgi->readFromPipe();
 	if (n < 0) { _state = DONE; return; }
+	_last_active_time = time(NULL);
 	if (n == 0) {
 		// CGI 프로세스 종료 → 응답 구성
 		// handleCgiResponse가 RequestHandler 내부 response를 채우면

@@ -9,6 +9,9 @@
 # include <map>
 
 # define MAX_EVENTS 1024
+# define EPOLL_WAIT_INTERVAL_MS 1000
+# define CLIENT_IDLE_TIMEOUT 60   // 초: 마지막 read/write 이후 idle 한도
+# define CGI_TIMEOUT 30           // 초: CGI 시작 이후 최대 실행 시간
 
 class ServerManager
 {
@@ -24,6 +27,7 @@ class ServerManager
 		void setEpollEvents(int fd, uint32_t events);
 		void addCgiFd(int cgi_fd, int client_fd, uint32_t events);
 		void removeCgi(int cgi_fd);
+		void sweepTimeouts();
 
 	public:
 		ServerManager();

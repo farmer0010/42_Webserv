@@ -44,6 +44,7 @@ class ClientSocket
 
 		ClientState _state;
 		time_t _last_active_time;
+		time_t _cgi_start_time;  // 0 = CGI 미진행, > 0 = CGI 시작 시점
 
 		HttpRequest		_request;
 		HttpResponse	_response;
@@ -74,6 +75,8 @@ class ClientSocket
 		int			getCgiWriteFd() const;
 		int			getCgiReadFd() const;
 		pid_t		getCgiPid() const;
+		time_t		getLastActiveTime() const { return _last_active_time; }
+		time_t		getCgiStartTime() const { return _cgi_start_time; }
 
 		void		handleRead();
 		void		handleWrite();
