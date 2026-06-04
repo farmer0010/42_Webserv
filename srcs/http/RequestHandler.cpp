@@ -29,14 +29,14 @@ void RequestHandler::init(const HttpRequest& req, const ServerBlock* config) {
         std::string relative_uri = this->request.getUri().substr(loc.getPath().length());
         this->absolute_path = loc.getRoot() + relative_uri;
 
-        if (isDirectory(this->absolute_path)) {
+        if (this->request.getMethod() == "GET" && isDirectory(this->absolute_path)) {
             if (this->absolute_path[this->absolute_path.length() - 1] != '/')
                 this->absolute_path += "/";
             this->absolute_path += loc.getIndex();
         }
     } else {
         this->absolute_path = "./html" + this->request.getUri();
-        if (isDirectory(this->absolute_path)) {
+        if (this->request.getMethod() == "GET" && isDirectory(this->absolute_path)) {
             if (this->absolute_path[this->absolute_path.length() - 1] != '/')
                 this->absolute_path += "/";
             this->absolute_path += "index.html";
