@@ -92,3 +92,11 @@ bool HttpRequest::parse(const std::vector<char>& raw_data) {
     
     return true;
 }
+
+void HttpRequest::clear() {
+    this->method.clear();
+    this->uri.clear();
+    this->version.clear();
+    this->headers.clear();
+    this->body.clear();
+}
