@@ -8,6 +8,7 @@
 #include <unistd.h>
 #include <sstream>
 #include <vector>
+#include <algorithm>
 
 RequestHandler::RequestHandler() : cgi(NULL), _server_config(NULL) {
 }
