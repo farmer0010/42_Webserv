@@ -244,6 +244,7 @@ bool ClientSocket::isBodyTooLarge() const
 // 메모리 점유 방지를 위해 비움
 void ClientSocket::sendErrorResponse(int status_code)
 {
+	std::cerr << "[error] " << status_code << " fd=" << _client_fd << std::endl;
 	_recv_buffer.clear();
 
 	_response.init();
@@ -282,6 +283,10 @@ void ClientSocket::processRequest()
 		return;
 	}
 
+	std::cout << "[request] " << _request.getMethod() << " "
+			  << _request.getUri() << " " << _request.getVersion()
+			  << " fd=" << _client_fd << std::endl;
+
 	// HTTP/1.1은 Host 헤더 필수 (RFC 7230 §5.4). 없으면 400.
 	// 헤더 키는 HttpRequest::parse가 lowercase로 저장하므로 "host"로 조회.
 	if (_request.getVersion() == "HTTP/1.1" &&
@@ -302,6 +307,8 @@ void ClientSocket::processRequest()
 
 	if (_request_handler.getCgi() != NULL) {
 		_cgi_start_time = time(NULL);
+		std::cout << "[cgi] spawn pid=" << _request_handler.getCgi()->getPid()
+				  << " fd=" << _client_fd << std::endl;
 		_state = CGI_WRITING_BODY;
 		return;
 	}
@@ -362,6 +369,7 @@ void ClientSocket::handleRead()
 		return;
 	}
 	if (n == 0) {
+		std::cout << "[peer-closed] fd=" << _client_fd << std::endl;
 		_state = DONE; // 클라이언트가 연결 종료
 		return;
 	}
@@ -411,6 +419,9 @@ void ClientSocket::handleWrite()
 	_last_active_time = time(NULL);
 
 	if (_bytes_sent >= _send_buffer.size()) {
+		std::cout << "[response] sent " << _send_buffer.size()
+				  << " bytes fd=" << _client_fd
+				  << (isKeepAlive() ? " (keep-alive)" : " (close)") << std::endl;
 		if (isKeepAlive())
 			resetForKeepAlive();
 		else
@@ -465,6 +476,8 @@ void ClientSocket::handleCgiRead()
 		// CGI 프로세스 종료 → 응답 구성
 		// handleCgiResponse가 RequestHandler 내부 response를 채우면
 		// getResponse()로 가져와 _response에 반영해야 buildResponse가 CGI 결과를 직렬화
+		std::cout << "[cgi] done pid=" << cgi->getPid()
+				  << " fd=" << _client_fd << std::endl;
 		_request_handler.handleCgiResponse(cgi->getResponseBuffer());
 		_response = _request_handler.getResponse();
 		std::string resp_str = _response.buildResponse();

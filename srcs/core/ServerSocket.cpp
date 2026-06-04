@@ -2,7 +2,6 @@
 
 ServerSocket::ServerSocket() : _server_fd(-1)
 {
-	std::cout << "ServerSocket: constructor called\n";
 }
 
 void ServerSocket::init(std::string host, int port, const std::vector<const ServerBlock*>& serverBlocks)
@@ -58,12 +57,14 @@ void ServerSocket::init(std::string host, int port, const std::vector<const Serv
 		close(_server_fd);
 		throw std::runtime_error("listen() failed");
 	}
+
+	std::cout << "[server] listening " << host << ":" << port
+			  << " (fd=" << _server_fd << ")" << std::endl;
 }
 
 ServerSocket::~ServerSocket()
 {
 	if (this->_server_fd >= 0)
 		close(_server_fd);
-	std::cout << "ServerSocket : destructor called\n";
 }
 
