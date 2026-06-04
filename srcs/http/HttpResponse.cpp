@@ -75,3 +75,7 @@ std::string HttpResponse::buildResponse() const{
     }
     return response;
 }
+
+void HttpResponse::clear() {
+    this -> init();
+}

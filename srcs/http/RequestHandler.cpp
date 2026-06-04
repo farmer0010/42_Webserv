@@ -157,7 +157,15 @@ void RequestHandler::handleGet() {
 }
 
 void RequestHandler::handlePost() {
-    std::ofstream file(this->absolute_path.c_str(), std::ios::binary);
+    std::string target_path = this->absolute_path;
+
+    if (isDirectory(target_path)) {
+        if (target_path[target_path.length() - 1] != '/')
+            target_path += "/";
+        target_path += "uploaded_file.bin"; 
+    }
+
+    std::ofstream file(target_path.c_str(), std::ios::binary);
     if (!file.is_open()) {
         generateErrorPage(500);
         return;
@@ -225,4 +233,15 @@ void RequestHandler::generateErrorPage(int status_code) {
         this->response.setReasonPhrase("Internal Server Error");
         this->response.setBody("<h1>500 Internal Server Error</h1>");
     }
+}
+
+void RequestHandler::clear() {
+    this->request.clear();
+    this->response.clear();
+    this->absolute_path.clear();
+    if (this->cgi != NULL) {
+        delete this->cgi;
+        this->cgi = NULL;
+    }
+    this->_server_config = NULL;
 }
