@@ -1,6 +1,9 @@
 #include "ServerManager.hpp"
 
 #include <sys/wait.h>
+#include <csignal>
+#include <ctime>
+#include <vector>
 
 ServerManager::ServerManager() : _epoll_fd(-1)
 {
@@ -58,11 +61,13 @@ void ServerManager::run()
 	struct epoll_event events[MAX_EVENTS];
 
 	while (true) {
-		int event_count = epoll_wait(_epoll_fd, events, MAX_EVENTS, -1);
+		// 인터벌을 두어 idle/CGI 만료 sweep 이 주기적으로 돌 수 있게 함
+		int event_count = epoll_wait(_epoll_fd, events, MAX_EVENTS, EPOLL_WAIT_INTERVAL_MS);
 		if (event_count < 0)
 			continue;
 		for (int i = 0; i < event_count; ++i)
 			dispatchEvents(events[i].data.fd, events[i].events);
+		sweepTimeouts();
 	}
 }
 
@@ -133,6 +138,49 @@ void ServerManager::setEpollEvents(int fd, uint32_t events)
 	event.events = events;
 	event.data.fd = fd;
 	epoll_ctl(_epoll_fd, EPOLL_CTL_MOD, fd, &event);
+}
+
+// run 루프가 매 cycle 호출. 만료된 클라이언트(idle 또는 CGI 실행시간 초과)를 정리.
+// - idle: 마지막 read/write 로부터 CLIENT_IDLE_TIMEOUT 초 경과
+// - CGI:  cgi 시작 시점으로부터 CGI_TIMEOUT 초 경과 → 자식 SIGKILL 후 회수
+// 응답은 보내지 않고 즉시 종료 (504 등 응답은 후속 작업)
+void ServerManager::sweepTimeouts()
+{
+	if (_clients.empty())
+		return;
+
+	time_t now = time(NULL);
+	std::vector<int> expired;
+
+	for (std::map<int, ClientSocket*>::iterator it = _clients.begin();
+		 it != _clients.end(); ++it) {
+		ClientSocket* client = it->second;
+		bool idle_expired = (now - client->getLastActiveTime()) > CLIENT_IDLE_TIMEOUT;
+		bool cgi_expired  = client->getCgiStartTime() > 0 &&
+							(now - client->getCgiStartTime()) > CGI_TIMEOUT;
+		if (idle_expired || cgi_expired)
+			expired.push_back(it->first);
+	}
+
+	for (size_t i = 0; i < expired.size(); ++i) {
+		int fd = expired[i];
+		std::map<int, ClientSocket*>::iterator it = _clients.find(fd);
+		if (it == _clients.end())
+			continue;
+		ClientSocket* client = it->second;
+
+		// CGI 가 살아있으면 SIGKILL 로 강제 종료 후 회수
+		pid_t pid = client->getCgiPid();
+		if (pid > 0) {
+			kill(pid, SIGKILL);
+			waitpid(pid, NULL, 0);
+		}
+		int write_fd = client->getCgiWriteFd();
+		int read_fd  = client->getCgiReadFd();
+		if (write_fd >= 0 && _cgi_to_client.count(write_fd)) removeCgi(write_fd);
+		if (read_fd  >= 0 && _cgi_to_client.count(read_fd))  removeCgi(read_fd);
+		removeClient(fd);
+	}
 }
 
 void ServerManager::dispatchEvents(int fd, uint32_t evs)
