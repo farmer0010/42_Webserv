@@ -13,6 +13,10 @@ RequestHandler::RequestHandler() : cgi(NULL), _server_config(NULL) {
 }
 
 RequestHandler::~RequestHandler() {
+    if (this->cgi) {
+        delete this->cgi;
+        this->cgi = NULL;
+    }
 }
 
 void RequestHandler::init(const HttpRequest& req, const ServerBlock* config) {
@@ -22,7 +26,8 @@ void RequestHandler::init(const HttpRequest& req, const ServerBlock* config) {
 
     if (this->_server_config != NULL) {
         const Location& loc = this->_server_config->getLocationForUri(this->request.getUri());
-        this->absolute_path = loc.getRoot() + this->request.getUri();
+        std::string relative_uri = this->request.getUri().substr(loc.getPath().length());
+        this->absolute_path = loc.getRoot() + relative_uri;
 
         if (isDirectory(this->absolute_path)) {
             if (this->absolute_path[this->absolute_path.length() - 1] != '/')
@@ -81,6 +86,11 @@ HttpResponse RequestHandler::processRequest() {
 }
 
 void RequestHandler::handleCgiResponse(const std::vector<char>& cgi_result) {
+    if (cgi_result.empty()) {
+        generateErrorPage(500);
+        return;
+    }
+
     std::string cgi_str(cgi_result.begin(), cgi_result.end());
     size_t header_end = cgi_str.find("\r\n\r\n");
     size_t delimiter_len = 4;
