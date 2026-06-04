@@ -15,8 +15,8 @@ class HttpRequest
         std::vector<char> body;
         
     public:
-        HttpRequest();
-        ~HttpRequest();
+        HttpRequest(){};
+        ~HttpRequest(){};
 
         bool parse(const std::vector<char>& raw_data);
 
