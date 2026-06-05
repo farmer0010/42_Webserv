@@ -16,7 +16,7 @@ void ServerSocket::init(std::string host, int port, const std::vector<const Serv
 	memset(&hints, 0, sizeof(hints));
 	hints.ai_family = AF_INET;
 	hints.ai_socktype = SOCK_STREAM;
-	if (getaddrinfo(host.c_str(), NULL, &hints, &res) != 0)
+	if (getaddrinfo(host.c_str(), NULL, &hints, &res) != 0 || !res)
 		throw std::runtime_error("ServerSocket: getaddrinfo() failed: " + host);
 	memset(&_address, 0, sizeof(_address));
 	_address.sin_family = AF_INET;
