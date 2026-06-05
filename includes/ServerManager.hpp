@@ -25,7 +25,7 @@ class ServerManager
 		void handleAccept(int server_fd);
 		void removeClient(int client_fd);
 		void setEpollEvents(int fd, uint32_t events);
-		void addCgiFd(int cgi_fd, int client_fd, uint32_t events);
+		bool addCgiFd(int cgi_fd, int client_fd, uint32_t events);
 		void removeCgi(int cgi_fd);
 		void sweepTimeouts();
 
