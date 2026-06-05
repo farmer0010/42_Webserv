@@ -18,6 +18,10 @@ Cgi::Cgi(const HttpRequest& req, const std::string& path)
 
 Cgi::~Cgi() {
     freeEnv();
+    if(this ->pid > 0) {
+        waitpid(this->pid, NULL, WNOHANG);
+    }
+    if (pipe_in[0] != -1) close(pipe_in[0]);
     if (pipe_in[1] != -1) close(pipe_in[1]);
     if (pipe_out[0] != -1) close(pipe_out[0]);
 }
@@ -66,7 +70,14 @@ void Cgi::freeEnv() {
 }
 
 bool Cgi::execute() {
-    if (pipe(pipe_in) == -1 || pipe(pipe_out) == -1) {
+    if (pipe(pipe_in) == -1) {
+        return false;
+    }
+    if (pipe(pipe_out) == -1) {
+        close(pipe_in[0]); 
+        close(pipe_in[1]);
+        pipe_in[0] = -1;
+         pipe_in[1] = -1;
         return false;
     }
 
