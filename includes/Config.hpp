@@ -6,12 +6,6 @@
 # include <map>
 # include <iostream>
 # include <stdexcept>
-# include <limits>
-
-// Location 의 _client_max_body_size 가 미설정 상태임을 나타내는 sentinel.
-// (size_t)-1. 이 값이면 호출자가 server 블록의 값을 사용해야 함.
-// 0 은 nginx 규약상 "제한 없음" 으로 이미 의미가 잡혀 있어 unset 표시로 못 씀.
-# define LOCATION_BODY_SIZE_UNSET (std::numeric_limits<size_t>::max())
 
 class Location
 {
@@ -23,8 +17,7 @@ class Location
 		bool						_autoindex;
 		std::string					_cgi_path;
 		std::string					_cgi_extension;
-		std::string					_return_url;
-		size_t						_client_max_body_size;
+		std::string					_return_url;	
 	public:
 		Location();
 		~Location();
@@ -46,8 +39,6 @@ class Location
 		void setCgiExtension(const std::string& e) { _cgi_extension = e; }
 		const std::string& getReturnUrl() const { return _return_url; }
 		void setReturnUrl(const std::string& u) { _return_url = u; }
-		size_t getClientMaxBodySize() const { return _client_max_body_size; }
-		void setClientMaxBodySize(size_t size) { _client_max_body_size = size; }
 };
 
 class ServerBlock
