@@ -180,6 +180,15 @@
 - `dispatchEvents` CGI 분기에 `_clients[client_fd]` NULL/없음 가드 — 마지막 방어선
 - 검증: c=5 0%(crash) → 81.3%, c=8 0% → 43.9%, c=15 생존, 정적 GET 회귀 없음
 
+### `(예정)` — refactor : body 한도 결정을 `resolveMaxBodySize()` 로 추출 (network only)
+
+- 평가용 conf 가 `location /post_body { client_max_body_size 100; }` 로 location-level 한도를 명시. nginx 규약상 location > server 우선.
+- 네트워크 영역 선반영 (Config 변경 대기 중에도 빌드 통과)
+  - `ClientSocket::extractRawUri()` — raw buffer 의 request-line 에서 URI 추출. HttpRequest 파싱 전 location 매칭용 헬퍼.
+  - `ClientSocket::resolveMaxBodySize()` — body 한도 결정 책임을 함수로 분리. 현재는 server 값만 리턴. Config 작업 완료 후 한 줄 추가로 완성될 자리에 TODO 마커.
+  - `isBodyTooLarge()` 가 위 함수 사용 (server-block 직접 조회 제거).
+- 동작 변화 없음 — 순수 리팩토링. server 한도 회귀 없음 확인.
+
 ---
 
 ## 4. 처리 현황 요약표
@@ -247,6 +256,25 @@
 - **autoindex 미구현** — `conf` 의 `autoindex on` 이 parser 만 통과하고 핸들러에서 사용 안 됨. `GET /uploads/` 가 404. 네트워크 쪽이 `cgi-bin/list_uploads.py` CGI 로 우회 중. `RequestHandler::handleGet` 에 `opendir/readdir` 기반 리스팅 추가 필요.
 - **URL 디코딩 부재** — `HttpRequest::parse` / `RequestHandler::init` 어디서도 `%XX` 디코딩 없음. 공백 포함 파일명 업로드/접근 시 404. `handlePost` / `handleDelete` 양쪽 모두 영향.
 - **`RequestHandler::handleCgiResponse` 강건화** — `Status: 200` 같이 reason 없는 케이스에서 `value.substr(4)` 가 throw → uncaught 시 서버 전체 종료. `value.length() > 4` 가드 필요.
+
+- **Location 의 `client_max_body_size` 지원 (jaemyu)** — 평가용 conf 가 `location /post_body { client_max_body_size 100; }` 명시. 현재 파서가 location 블록의 이 directive 를 모름 → 시작 시 conf 에러. 네트워크 쪽은 `resolveMaxBodySize()` 헬퍼로 인터페이스 추상화 완료(`(예정)` commit). Config 작업만 마치면 한 줄 추가로 완성.
+  - `includes/Config.hpp`
+    - `#include <limits>`
+    - `#define LOCATION_BODY_SIZE_UNSET (std::numeric_limits<size_t>::max())` — 0 은 nginx 규약상 "제한 없음" 으로 이미 의미가 잡혀 unset 표시에 못 씀
+    - `class Location` 에 `size_t _client_max_body_size;` 멤버 + `getClientMaxBodySize() / setClientMaxBodySize()` 추가
+  - `srcs/config/ServerBlock.cpp::Location::init()` — `_client_max_body_size = LOCATION_BODY_SIZE_UNSET;` 한 줄
+  - `srcs/config/ConfigParser.cpp` location 블록 분기에 `client_max_body_size` 인식 (server 블록의 137-145 줄 패턴과 동일, `loc.setClientMaxBodySize(sz)` 호출)
+  - 위 셋 완료되면 네트워크 쪽 `ClientSocket::resolveMaxBodySize()` 의 TODO 부분에 다음 추가:
+    ```cpp
+    std::string uri = extractRawUri();
+    if (!uri.empty()) {
+        try {
+            const Location& loc = block->getLocationForUri(uri);
+            size_t loc_size = loc.getClientMaxBodySize();
+            if (loc_size != LOCATION_BODY_SIZE_UNSET) return loc_size;
+        } catch (const std::exception&) {}
+    }
+    ```
 
 ### 🟡 컨벤션 명시화 / 후속 보강
 
