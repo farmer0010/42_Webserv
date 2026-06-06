@@ -157,6 +157,29 @@
 - **#9** `processRequest` 에서 `HTTP/1.1` 인데 `host` 헤더 없으면 400 반환
 - **#5** `dispatchEvents` 의 클라이언트 분기에서 EPOLLHUP/EPOLLERR 즉시 종료를 제거. `peer_gone` 플래그로 표시한 뒤 EPOLLIN/EPOLLOUT 처리를 먼저 끝내고, 송신 잔여(`state != WRITING`)가 없을 때만 정리. 마지막 요청 직후 FIN 으로 응답이 못 나가던 케이스 해소
 
+### `80ead96` — chore : 네트워크 레이어 안정화 마무리 + 진단 문서/빌드 환경
+
+- **#14** `ServerSocket::init` 의 `getaddrinfo` 성공 후 `res == NULL` 가드 추가
+- **#15** `ServerManager.hpp` 의 `addCgiFd` 반환 `void → bool` (구현부 시그니처와 sync). 호출자에서 실패 시 SIGKILL/waitpid/cleanup 분기 활성화
+- `NETWORK_REVIEW.md` 진단 추적 문서 트래킹 시작
+- `Dockerfile` 추가 (macOS 에서 epoll 빌드 검증용)
+
+### `136a885` — fix : CGI pipe I/O 음수 반환 시 DONE 전이 제거 (A-1)
+
+- `handleCgiWrite/handleCgiRead` 의 `cgi->writeToPipe/readFromPipe` 반환 `n<0` 분기를 DONE 전이가 아닌 그냥 `return` 으로 변경
+- 서브젝트 룰상 read/write 후 errno 검사 금지 → EAGAIN / 실제 에러 구분 불가. EAGAIN 한 번에 연결이 끊기던 회귀 차단
+- LT 모드라 다음 epoll 사이클이 재시도, 실제 에러는 EPOLLHUP/EOF 경로로 자연 정리, 진짜 hang 은 `CGI_TIMEOUT(30s)` 처리
+- 검증: siege CGI c=2 98.5% → 99.9%, c=3 새로 98.7% 확보
+
+### `939dcc9` — fix : CGI 부하 시 SIGSEGV 해소 — removeClient 자식/매핑 일괄 정리
+
+- c≥5 동시 CGI 시 `exit 139 (SIGSEGV)` 로 죽던 문제 해결
+- `removeClient`
+  - `_cgi_to_client` 에서 해당 `client_fd` 참조하는 모든 cgi fd 일괄 `removeCgi` (stale 엔트리 누락 경로 차단)
+  - 살아있는 CGI 자식 있으면 `SIGKILL` + 블로킹 `waitpid` 로 좀비/orphan 방지 (기존 3곳 WNOHANG 회수가 미달인 케이스 보강)
+- `dispatchEvents` CGI 분기에 `_clients[client_fd]` NULL/없음 가드 — 마지막 방어선
+- 검증: c=5 0%(crash) → 81.3%, c=8 0% → 43.9%, c=15 생존, 정적 GET 회귀 없음
+
 ---
 
 ## 4. 처리 현황 요약표
@@ -170,39 +193,68 @@
 | 5 | EPOLLHUP 순서 | ✅ `2a07321` |
 | 6 | 413 후 buffer 유지 | ✅ `2a07321` |
 | 7 | epoll_wait 타임아웃 | ✅ `952f3d4` |
-| 8 | keep-alive buffer 손실 | ❌ |
+| 8 | keep-alive buffer 손실 | ❌ (시지 6% 재현) |
 | 9 | Host 검증 | ✅ `2a07321` |
 | 10 | reason phrase | ✅ `2a07321` |
 | 11 | Content-Length atoi | ✅ `f1c1dd9` |
-| 12 | removeClient 가드 | ❌ |
-| 13 | accept() 실패 | ❌ |
-| 14 | getaddrinfo NULL | ❌ |
-| 15 | addCgiFd 실패 처리 | ❌ |
-| 16 | CGI 동시 readiness | ❌ |
-| 17 | CGI 좀비 회수 | ✅ `99ad1d9` |
+| 12 | removeClient 가드 | ✅ `939dcc9` |
+| 13 | accept() EMFILE 가드 | ❌ |
+| 14 | getaddrinfo NULL | ✅ `80ead96` |
+| 15 | addCgiFd 실패 처리 | ✅ `80ead96` |
+| 16 | CGI 동시 readiness | ❌ (latency only) |
+| 17 | CGI 좀비 회수 | ✅ `99ad1d9` + `939dcc9` (보강) |
 | 추가 | handleRead 상태 가드 | ✅ `99ad1d9` |
 | 추가 | dead member `_cgi` | ✅ `b911ec8` |
 | 추가 | resetForKeepAlive 핸들러 갱신 | ✅ `b911ec8` |
 | 추가 | Location 매칭 wiring | ✅ `b7f78ed` |
 | 추가 | Makefile 보강 | ✅ `b7f78ed` |
+| A-1 | CGI pipe I/O n<0 → DONE 오인 (EAGAIN 한번에 연결 끊김) | ✅ `136a885` |
+| B   | c≥5 CGI SIGSEGV (orphan _cgi_to_client + 미회수 자식) | ✅ `939dcc9` |
+| B-fu | Phantom EPOLLOUT — `[accept] → sent 0 bytes` 무요청 응답 | ❌ |
 
-**진척**: 처음 진단 17개 중 **11개 완료**, 진단 외 추가 5개 모두 완료.
+**진척**: 처음 진단 17개 중 **14개 완료**, 진단 외 추가 7개 완료, 잔여 3개(#8/#13/#16) + 신규 추적 1개(B-fu).
 
 ---
-
 ## 5. HTTP / Config 담당자 공유 항목
 
 ### 🟢 해소됨
 
 - ~~**`HttpRequest::HttpRequest()` / `~HttpRequest()` 정의 누락**~~ — 어느 시점에 추가되어 링크 통과 확인됨. 직전 commit `f1c1dd9` 이후 진행한 타임아웃 작업에서 Docker 빌드 결과 `/app/webserv` 바이너리 생성 성공.
 
+### 🔴 시급 (시지 평가 영향)
+
+- **`allow_methods` 미적용 — 서브젝트 핵심 요구사항 위반** (2026-06-06 발견)
+  - 서브젝트: *"The configuration file should set the HTTP methods accepted by the route"*
+  - 현 동작: `RequestHandler::processRequest` (`srcs/http/RequestHandler.cpp:47-86`) 가 `loc.getAllowMethods()` 를 조회하지 않고 메서드만 보고 분기.
+  - 영향:
+    - `POST /` → **201** (실제 `www/uploaded_file.bin` 생성) — conf 의 `location / { allow_methods GET; }` 무시
+    - `DELETE /` → 403 (디렉터리 unlink 시도 실패) — 405 가 맞음
+    - 평가자가 `curl -X POST localhost:8080/ -d x` 한 번에 잡히는 항목
+  - 패치 방향: `processRequest` 의 CGI/메서드 분기 진입 전에 가드.
+    ```cpp
+    const std::vector<std::string>& allowed = loc.getAllowMethods();
+    if (std::find(allowed.begin(), allowed.end(), request.getMethod()) == allowed.end()) {
+        generateErrorPage(405);
+        return this->response;
+    }
+    ```
+  - 검증: `GET / POST / DELETE /` 가 각각 200/405/405 가 되는지, `/uploads` 는 GET/POST/DELETE 모두 정상 동작 유지.
+
+- **dev `92bb6b4` 회귀 — `Cgi.cpp` double-close**
+  - 변경 내용: `~Cgi` 가 `pipe_in[0]` 까지 close 하도록 추가. 그러나 `execute()` 의 부모 성공 경로(`Cgi.cpp:110-114`)와 fork 실패 경로(`Cgi.cpp:77-81`) 가 close 후 `-1` 미설정.
+  - 결과: **모든 정상 CGI 요청마다 `pipe_in[0]` double-close** → 무관한 fd 가 닫혀 미스터리 EBADF / 다른 클라이언트 socket 손실. siege 고동시성에서 폭발.
+  - 패치 방향: close 직후 `pipe_xx[i] = -1;` 한 줄씩.
+- **autoindex 미구현** — `conf` 의 `autoindex on` 이 parser 만 통과하고 핸들러에서 사용 안 됨. `GET /uploads/` 가 404. 네트워크 쪽이 `cgi-bin/list_uploads.py` CGI 로 우회 중. `RequestHandler::handleGet` 에 `opendir/readdir` 기반 리스팅 추가 필요.
+- **URL 디코딩 부재** — `HttpRequest::parse` / `RequestHandler::init` 어디서도 `%XX` 디코딩 없음. 공백 포함 파일명 업로드/접근 시 404. `handlePost` / `handleDelete` 양쪽 모두 영향.
+- **`RequestHandler::handleCgiResponse` 강건화** — `Status: 200` 같이 reason 없는 케이스에서 `value.substr(4)` 가 throw → uncaught 시 서버 전체 종료. `value.length() > 4` 가드 필요.
+
 ### 🟡 컨벤션 명시화 / 후속 보강
 
 - **`HttpRequest::parse` 가 헤더 키를 lowercase 로 저장** — 의도된 RFC 부합 동작이나 hpp `getHeaders()` 주석에 한 줄 명시 부탁. 향후 호출자 전부 이 컨벤션을 따라야 함.
 - **`Cgi.hpp` 빌드 차단** — `ssize_t` 위해 `<sys/types.h>` 추가했음 (`514aa48`). 본 commit 은 HTTP 영역을 건드린 것이므로 HTTP 담당자가 동일 fix 를 본인 PR 흐름에 흡수해도 OK.
-- **`RequestHandler::handleCgiResponse` 강건화** — `Status: 200` 같이 reason 없는 케이스에서 `value.substr(4)` 가 throw 할 수 있음. 길이 가드 추가 필요.
 - **`HttpResponse::buildResponse` 가 status_code 기반 표준 reason phrase 자체 매핑하면** 우리 쪽 `sendErrorResponse` 의 switch 가 사라질 수 있음. 옵션.
-- **`Cgi::~Cgi` 에서 자식 프로세스 회수 보장** — `kill(pid, SIGKILL)` + `waitpid` 로 escalation. 우리 쪽 WNOHANG 은 *이미* 종료된 자식만 회수.
+- **`Cgi::~Cgi` 에서 자식 프로세스 회수 보장** — `kill(pid, SIGKILL)` + `waitpid` 로 escalation. 우리 쪽 `removeClient` 가 보강해서 좀비는 차단됐지만, Cgi 객체 단독 라이프사이클에서도 보험 권장.
+- **`ServerSocket::init` 의 fcntl/listen 실패 경로 double-close (B-3)** — `close(_server_fd)` 후 `_server_fd = -1` 미설정 → throw 후 `~ServerSocket` 가 다시 close. 시작 시점이라 실전 충돌 가능성은 낮지만 결함.
 
 ### 🟢 합의 사항
 
@@ -212,14 +264,19 @@
 
 ## 6. 남은 우선순위
 
-### 추천 진행 순서
+### 추천 진행 순서 (2026-06-06 갱신)
 
-| 순서 | 항목 | 비고 |
-|---|---|---|
-| 1 | **#15** `addCgiFd` 실패 처리 | 무한 매달림 방지 |
-| 2 | **#12, #14** `removeClient` 가드 / `getaddrinfo` NULL 가드 | cleanup 묶음 |
-| 3 | **#8** keep-alive buffer 보존 (파이프라이닝) | 평가 시 보지 않을 가능성 높음, 후순위 |
-| 4 | **#13, #16** accept EMFILE / CGI 동시 readiness | 인지만, 평가에서 거의 안 봄 |
+| 순서 | 항목 | 영역 | 비고 |
+|---|---|---|---|
+| 1 | **`allow_methods` 미적용** | HTTP 팀 | 서브젝트 핵심 요구사항. `curl -X POST /` 한 번에 발견. 평가 즉시 탈락 |
+| 2 | **dev 92bb6b4 회귀** Cgi.cpp double-close | HTTP 팀 | 모든 CGI 요청 영향, 시지 평가 즉시 차단 |
+| 3 | **autoindex 구현** | HTTP 팀 | `/uploads/` 디렉터리 보기, 평가 항목 |
+| 4 | **B-fu** Phantom EPOLLOUT — `[accept] → sent 0 bytes` | 본인 | 시지 CGI c≥5 의 잔여 실패 주범 |
+| 5 | **#8** keep-alive buffer 보존 | 본인 | 시지 정적 GET keep-alive 6% 실패 재현 |
+| 6 | **A-2** handleAccept 루프 | 본인 | 404 꼬리 1.4s 의 원인. 5줄 패치 |
+| 7 | **handleCgiResponse 가드** | HTTP 팀 | uncaught exception → 서버 종료 위험 |
+| 8 | **#13** accept EMFILE 가드 | 본인 | 실평가에서 거의 안 보이지만 안전 |
+| 9 | **#16** CGI 동시 readiness | 본인 | latency only, 후순위 |
 
 ### Chunked 디코딩 분담
 
@@ -249,3 +306,37 @@ docker build -t webserv-build-check .
 - 사용 가능한 시스템콜 / 외부 함수는 42 Webserv 과제 subject 기준
 - 평가 우선순위: HTTP/1.1 — 쿠키/세션(보너스) 제외
 - 클라이언트 본문 크기 제한은 `ServerBlock::getClientMaxBodySize()` 를 통해 ServerBlock 별로 결정, 0 은 제한 없음
+
+---
+
+## 9. siege 결과 (2026-06-06)
+
+Docker 컨테이너(`webserv-siege` 이미지, 포트 8080) 상대로 macOS host 에서 siege 4.1.7 구동.
+
+### 시나리오별
+
+| # | 시나리오 | 동시성 | Availability | TPS | Failed | 비고 |
+|---|---|---|---|---|---|---|
+| 1 | 정적 GET keep-alive | c=20, 15s | 94.01 % | 2527 | 1043 | siege abort. #8 의심 |
+| 2 | 정적 GET close | c=15, 15s | **100.00 %** | 3631 | 0 | ✅ 완벽 |
+| 3 | 404 close | c=15, 15s | 98.29 % | 3847 | 1035 | 꼬리 1.4s. A-2 의심 |
+| 4 | CGI close | c=8, 10s | 4.52 % (`136a885` 후) → **43.90 %** (`939dcc9` 후) | 413 | 1025 | B-fu phantom EPOLLOUT 잔존 |
+| 4b | CGI close | c=2, 5s | **99.92 %** | 246 | 1 | 낮은 동시성 안정 |
+| 4c | CGI close | c=5, 5s | **81.32 %** | 432 | 547 | 패치 전엔 crash |
+| 4d | CGI close | c=15, 10s | 30.39 % | 425 | 1033 | 서버 생존, 회복은 못함 |
+| 5 | mixed URLs | c=10, 10s | 41.44 % | 66 | 985 | CGI 가 발목 |
+
+### 패치 단계별 (CGI 한정)
+
+| 시점 | c=2 | c=5 | c=8 | c=15 |
+|---|---|---|---|---|
+| 패치 전 | 98.5 % | crash (segfault) | 0.29 % (실질 crash) | crash |
+| `136a885` (A-1) | 99.9 % | crash 여전 | 4.5 % | crash |
+| `939dcc9` (B) | 99.9 % | **81.3 %** | **43.9 %** | 30.4 % (생존) |
+
+### 빌드/실행 노트
+
+- `docker build -t webserv-siege .` → 이미지 빌드
+- `docker run -d --name webserv-test -p 8080:8080 webserv-siege` 로 기동
+- macOS 호스트에서 `siege -b -c <N> -t <T>s -H "Connection: close" http://localhost:8080/<path>`
+- siege 설정 파일: `~/.siege/siege.conf` (기본값 그대로)
