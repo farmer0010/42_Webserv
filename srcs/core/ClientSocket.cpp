@@ -449,28 +449,31 @@ pid_t ClientSocket::getCgiPid() const
 }
 
 // LT 모드: EPOLLOUT 발화 시 POST body를 CGI stdin에 1회 전송
-// writeToPipe() 반환값: >0 = 더 남음, 0 = 전송 완료, <0 = 에러
+// writeToPipe() 반환값: >0 = 더 남음, 0 = 전송 완료, <0 = 에러(EAGAIN 포함)
+// n<0 시 DONE 전이 금지: errno 검사 금지 룰 하에 EAGAIN/실제 에러 구분 불가.
+// LT 가 다음 사이클에 재발화 → 재시도. 진짜 hang 은 CGI_TIMEOUT(30s) 이 정리.
 void ClientSocket::handleCgiWrite()
 {
 	Cgi* cgi = _request_handler.getCgi();
 	if (!cgi) { _state = DONE; return; }
 
 	ssize_t n = cgi->writeToPipe();
-	if (n < 0) { _state = DONE; return; }
+	if (n < 0) return;
 	_last_active_time = time(NULL);
 	if (n == 0)
 		_state = CGI_READING_OUTPUT; // body 전송 완료 → 결과 읽기 단계로
 }
 
 // LT 모드: EPOLLIN 발화 시 CGI stdout에서 1회 읽기
-// readFromPipe() 반환값: >0 = 더 남음, 0 = EOF(CGI 종료), <0 = 에러
+// readFromPipe() 반환값: >0 = 더 남음, 0 = EOF(CGI 종료), <0 = 에러(EAGAIN 포함)
+// n<0 처리는 handleCgiWrite 와 동일 — 재시도 대기, hang 은 타임아웃이 정리.
 void ClientSocket::handleCgiRead()
 {
 	Cgi* cgi = _request_handler.getCgi();
 	if (!cgi) { _state = DONE; return; }
 
 	ssize_t n = cgi->readFromPipe();
-	if (n < 0) { _state = DONE; return; }
+	if (n < 0) return;
 	_last_active_time = time(NULL);
 	if (n == 0) {
 		// CGI 프로세스 종료 → 응답 구성
