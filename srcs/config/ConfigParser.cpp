@@ -206,6 +206,15 @@ Config ConfigParser::parse() {
                             loc.setCgiExtension(_tokens[i++]);
                             if (i >= _tokens.size() || _tokens[i++] != ";") throw std::runtime_error(err(i, "Expected ';'"));
                         }
+                        else if (_tokens[i] == "client_max_body_size") {
+                            i++;
+                            size_t sz;
+                            try { sz = parseSize(_tokens[i]); }
+                            catch (const std::exception& e) { throw std::runtime_error(err(i, e.what())); }
+                            loc.setClientMaxBodySize(sz);
+                            i++;
+                            if (i >= _tokens.size() || _tokens[i++] != ";") throw std::runtime_error(err(i, "Expected ';'"));
+                        }
                         else if (_tokens[i] == "return") {
                             i++;
                             loc.setReturnUrl(_tokens[i++]);

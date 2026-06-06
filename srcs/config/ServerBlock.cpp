@@ -16,6 +16,7 @@ void Location::init() {
 	this->_cgi_path = "";
 	this->_cgi_extension = "";
 	this->_return_url = "";
+	this->_client_max_body_size = LOCATION_BODY_SIZE_UNSET;
 }
 
 ServerBlock::ServerBlock() {}
