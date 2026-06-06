@@ -171,22 +171,6 @@
 - LT 모드라 다음 epoll 사이클이 재시도, 실제 에러는 EPOLLHUP/EOF 경로로 자연 정리, 진짜 hang 은 `CGI_TIMEOUT(30s)` 처리
 - 검증: siege CGI c=2 98.5% → 99.9%, c=3 새로 98.7% 확보
 
-### `(예정)` — feat : location 블록별 `client_max_body_size` 지원
-
-- 평가용 conf (`cgi_tester` 동봉 conf) 가 `location /post_body { client_max_body_size 100; }` 사용. 기존 파서는 location 블록의 해당 directive 를 모름 → 시작 시점에 conf 에러.
-- 변경 (사용자 명시 허락 하에 Config 영역도 함께)
-  - `Location` 클래스에 `_client_max_body_size` 멤버 추가, `LOCATION_BODY_SIZE_UNSET` sentinel (`(size_t)-1`) 도입. 0 은 nginx 규약상 "제한 없음" 이미 차지 중이라 unset 표시로 못 씀.
-  - `Location::init()` 가 sentinel 로 초기화.
-  - `ConfigParser` 의 location 블록 분기에 `client_max_body_size` 인식 추가.
-- 네트워크 영역
-  - `ClientSocket::extractRawUri()` — raw buffer 의 request-line 에서 URI 추출 (파싱 전 location 매칭용)
-  - `ClientSocket::resolveMaxBodySize()` — location 값 우선, sentinel 이면 server 값으로 폴백
-  - `isBodyTooLarge` 가 위 헬퍼 사용
-- 검증 (`conf/test_body_size.conf` 추가)
-  - server 1MB / location `/post_body` 100B 한도 정의
-  - `POST /` 500KB → 201, 2MB → 413 (server 한도)
-  - `POST /post_body` 100B → 201, 101B → 413, 1KB → 413 (location 우선)
-
 ### `939dcc9` — fix : CGI 부하 시 SIGSEGV 해소 — removeClient 자식/매핑 일괄 정리
 
 - c≥5 동시 CGI 시 `exit 139 (SIGSEGV)` 로 죽던 문제 해결
@@ -227,7 +211,6 @@
 | A-1 | CGI pipe I/O n<0 → DONE 오인 (EAGAIN 한번에 연결 끊김) | ✅ `136a885` |
 | B   | c≥5 CGI SIGSEGV (orphan _cgi_to_client + 미회수 자식) | ✅ `939dcc9` |
 | B-fu | Phantom EPOLLOUT — `[accept] → sent 0 bytes` 무요청 응답 | ❌ |
-| 추가 | location 블록별 `client_max_body_size` 지원 (Location 멤버 + 파서 + 우선순위) | ✅ (예정 commit) |
 
 **진척**: 처음 진단 17개 중 **14개 완료**, 진단 외 추가 7개 완료, 잔여 3개(#8/#13/#16) + 신규 추적 1개(B-fu).
 
