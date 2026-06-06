@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+	<meta charset="UTF-8">
+	<title>Error Pages — 42_Webserv</title>
+	<style>
+		body { font-family: -apple-system, system-ui, sans-serif; max-width: 720px; margin: 40px auto; padding: 0 20px; color: #222; }
+		h1 { border-bottom: 2px solid #222; padding-bottom: 8px; }
+		section { margin: 28px 0; }
+		h2 { font-size: 1.1em; color: #444; }
+		.muted { color: #888; font-size: 0.9em; }
+		.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; }
+		.card { border: 1px solid #ddd; border-radius: 6px; padding: 14px; text-align: center; text-decoration: none; color: #222; background: #fafafa; transition: transform 0.05s, box-shadow 0.1s; }
+		.card:hover { transform: translateY(-2px); box-shadow: 0 4px 8px rgba(0,0,0,0.08); background: #fff; }
+		.code { font-size: 2em; font-weight: bold; line-height: 1; }
+		.name { font-size: 0.9em; color: #666; margin-top: 6px; }
+		.c-400 .code { color: #c0392b; }
+		.c-403 .code { color: #8e44ad; }
+		.c-404 .code { color: #c0392b; }
+		.c-405 .code { color: #2c7873; }
+		.c-413 .code { color: #d35400; }
+		.c-50x .code { color: #e67e22; }
+		.note { background: #f9f9f9; border-left: 3px solid #ddd; padding: 10px 14px; margin-top: 16px; font-size: 0.9em; color: #555; line-height: 1.6; }
+	</style>
+</head>
+<body>
+	<h1>Error Pages</h1>
+	<p class="muted"><a href="/">← 홈으로</a> · 각 카드 클릭 = 해당 에러 페이지 직접 열람</p>
+
+	<section>
+		<h2>에러 페이지 미리보기</h2>
+		<div class="grid">
+			<a class="card c-400" href="/error_pages/400.html" target="_blank">
+				<div class="code">400</div>
+				<div class="name">Bad Request</div>
+			</a>
+			<a class="card c-403" href="/error_pages/403.html" target="_blank">
+				<div class="code">403</div>
+				<div class="name">Forbidden</div>
+			</a>
+			<a class="card c-404" href="/error_pages/404.html" target="_blank">
+				<div class="code">404</div>
+				<div class="name">Not Found</div>
+			</a>
+			<a class="card c-405" href="/error_pages/405.html" target="_blank">
+				<div class="code">405</div>
+				<div class="name">Method Not Allowed</div>
+			</a>
+			<a class="card c-413" href="/error_pages/413.html" target="_blank">
+				<div class="code">413</div>
+				<div class="name">Payload Too Large</div>
+			</a>
+			<a class="card c-50x" href="/error_pages/50x.html" target="_blank">
+				<div class="code">5xx</div>
+				<div class="name">Server Error</div>
+			</a>
+		</div>
+		<div class="note">
+			위 링크는 HTML 파일을 직접 여는 것 (상태 200). 서버가 실제 에러 응답으로 이 페이지를 돌려주는지는
+			<code>/does-not-exist</code> (404), <code>/uploads/</code> 에 1MB 초과 POST (413) 등으로 트리거 후 응답 헤더 확인.
+		</div>
+	</section>
+</body>
+</html>
