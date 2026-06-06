@@ -52,6 +52,7 @@
 
 <script>
 const UPLOADS = '/uploads/';
+const LIST_URL = '/cgi-bin/list_uploads.py';
 const listEl = document.getElementById('files');
 const emptyEl = document.getElementById('empty');
 const statusEl = document.getElementById('status');
@@ -62,38 +63,26 @@ function showStatus(msg, ok) {
 	setTimeout(function(){ statusEl.className = 'status'; }, 3000);
 }
 
-function parseAutoindex(html) {
-	const doc = new DOMParser().parseFromString(html, 'text/html');
-	const anchors = doc.querySelectorAll('a');
-	const files = [];
-	anchors.forEach(function(a){
-		let href = a.getAttribute('href') || '';
-		if (!href || href === '../' || href === './' || href === '/' || href === '..' || href === '.') return;
-		if (href.endsWith('/')) return; // 디렉터리는 일단 제외
-		// /uploads/ 접두사 제거
-		if (href.indexOf(UPLOADS) === 0) href = href.substring(UPLOADS.length);
-		// 슬래시로 시작하면 마지막 segment만
-		if (href.indexOf('/') !== -1) href = href.substring(href.lastIndexOf('/') + 1);
-		try { href = decodeURIComponent(href); } catch (e) {}
-		if (href) files.push(href);
-	});
-	return files;
+function formatSize(n) {
+	if (n < 1024) return n + ' B';
+	if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+	return (n / 1024 / 1024).toFixed(1) + ' MB';
 }
 
 async function loadFiles() {
 	try {
-		const res = await fetch(UPLOADS, { headers: { 'Accept': 'text/html' } });
+		const res = await fetch(LIST_URL);
 		if (!res.ok) {
 			listEl.innerHTML = '';
 			emptyEl.style.display = 'block';
 			showStatus('목록 로드 실패: ' + res.status, false);
 			return;
 		}
-		const html = await res.text();
-		const files = parseAutoindex(html);
-		render(files);
+		const data = await res.json();
+		if (data.error) showStatus('목록 오류: ' + data.error, false);
+		render(data.files || []);
 	} catch (e) {
-		showStatus('네트워크 오류: ' + e.message, false);
+		showStatus('네트워크/파싱 오류: ' + e.message, false);
 	}
 }
 
@@ -104,19 +93,22 @@ function render(files) {
 		return;
 	}
 	emptyEl.style.display = 'none';
-	files.forEach(function(name){
+	files.forEach(function(f){
 		const li = document.createElement('li');
 		const a = document.createElement('a');
-		a.href = UPLOADS + encodeURIComponent(name);
-		a.textContent = name;
+		a.href = UPLOADS + encodeURIComponent(f.name);
+		a.textContent = f.name + '  ';
 		a.target = '_blank';
+		const sizeSpan = document.createElement('span');
+		sizeSpan.className = 'muted';
+		sizeSpan.textContent = '(' + formatSize(f.size) + ')';
+		a.appendChild(sizeSpan);
 		const btn = document.createElement('button');
 		btn.className = 'danger';
 		btn.textContent = '삭제';
-		btn.onclick = function(){ deleteFile(name, li); };
+		btn.onclick = function(){ deleteFile(f.name, li); };
 		li.appendChild(a);
 		li.appendChild(btn);
-		// 선택 표시: 좌측 영역 클릭 시 highlight (시각적 피드백)
 		li.onclick = function(e){
 			if (e.target === btn) return;
 			document.querySelectorAll('.file-list li').forEach(function(x){ x.classList.remove('selected'); });
