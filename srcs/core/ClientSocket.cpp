@@ -48,6 +48,45 @@ std::string ClientSocket::extractRawHeader(const std::string& key) const
 	return header_str.substr(pos + search_key.size(), end - pos - search_key.size());
 }
 
+// raw buffer 의 request-line 에서 URI 추출 (파싱 전 location 매칭용).
+// 형식: "METHOD URI VERSION\r\n". 실패 시 빈 문자열.
+std::string ClientSocket::extractRawUri() const
+{
+	const char* crlf = "\r\n";
+	std::vector<char>::const_iterator line_end =
+		std::search(_recv_buffer.begin(), _recv_buffer.end(), crlf, crlf + 2);
+	if (line_end == _recv_buffer.end())
+		return "";
+	std::string line(_recv_buffer.begin(), line_end);
+	size_t sp1 = line.find(' ');
+	if (sp1 == std::string::npos) return "";
+	size_t sp2 = line.find(' ', sp1 + 1);
+	if (sp2 == std::string::npos) return "";
+	return line.substr(sp1 + 1, sp2 - sp1 - 1);
+}
+
+// nginx 우선순위 적용: location 값 > server 값.
+// Location 의 _client_max_body_size 가 sentinel(UNSET) 이면 server 값으로 폴백.
+// 매칭되는 Location 이 없거나 ServerBlock 자체가 없으면 0 (제한 없음) 으로 안전 측 처리.
+size_t ClientSocket::resolveMaxBodySize() const
+{
+	const ServerBlock* block = selectServerBlockFromBuffer();
+	if (!block)
+		return 0;
+	std::string uri = extractRawUri();
+	if (!uri.empty()) {
+		try {
+			const Location& loc = block->getLocationForUri(uri);
+			size_t loc_size = loc.getClientMaxBodySize();
+			if (loc_size != LOCATION_BODY_SIZE_UNSET)
+				return loc_size;
+		} catch (const std::exception&) {
+			// 매칭되는 location 없음 → server 값으로 폴백
+		}
+	}
+	return block->getClientMaxBodySize();
+}
+
 // raw 헤더 영역에서 특정 키가 등장한 횟수 (RFC 7230 §3.3.3 중복 검출용).
 // request-line 의 메서드가 우연히 "Content-Length:" 같은 문자열을 가질 수 없으므로
 // 헤더 영역 전체에서 "\r\n" + key + ":" 패턴을 카운트해도 안전.
@@ -208,13 +247,10 @@ bool ClientSocket::isRequestComplete() const
 }
 
 // nginx 방식: Content-Length만 봐도 초과면 즉시 차단, 누적 크기도 체크
+// 한도는 location 값 우선 / sentinel 이면 server 값 (resolveMaxBodySize 참조).
 bool ClientSocket::isBodyTooLarge() const
 {
-	const ServerBlock* block = selectServerBlockFromBuffer();
-	if (!block)
-		return false;
-
-	size_t max_size = block->getClientMaxBodySize();
+	size_t max_size = resolveMaxBodySize();
 	if (max_size == 0)
 		return false; // 0 = 제한 없음
 
