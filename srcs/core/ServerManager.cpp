@@ -112,6 +112,28 @@ void ServerManager::removeClient(int client_fd)
 	std::map<int, ClientSocket*>::iterator it = _clients.find(client_fd);
 	if (it == _clients.end())
 		return;
+
+	// 이 client 를 참조하는 _cgi_to_client 잔존 엔트리 일괄 정리.
+	// 정상 흐름에선 호출자가 미리 정리하지만, 누락 경로(예: client 분기 state==DONE)에서
+	// stale 엔트리가 남으면 다음 epoll 사이클에서 _clients[client_fd]==NULL 역참조로
+	// SIGSEGV. 여기서 마지막 가드.
+	std::vector<int> orphan_cgi_fds;
+	for (std::map<int, int>::iterator cit = _cgi_to_client.begin();
+		 cit != _cgi_to_client.end(); ++cit) {
+		if (cit->second == client_fd)
+			orphan_cgi_fds.push_back(cit->first);
+	}
+	for (size_t i = 0; i < orphan_cgi_fds.size(); ++i)
+		removeCgi(orphan_cgi_fds[i]);
+
+	// 살아있는 CGI 자식이 있으면 SIGKILL + 블로킹 waitpid 로 좀비/orphan 방지.
+	// kill 직후라 블로킹해도 즉시 reap.
+	pid_t pid = it->second->getCgiPid();
+	if (pid > 0) {
+		kill(pid, SIGKILL);
+		waitpid(pid, NULL, 0);
+	}
+
 	epoll_ctl(_epoll_fd, EPOLL_CTL_DEL, client_fd, NULL);
 	delete it->second;
 	_clients.erase(it);
@@ -210,7 +232,16 @@ void ServerManager::dispatchEvents(int fd, uint32_t evs)
 	// CGI 파이프 fd: CGI 프로세스와의 I/O 처리
 	if (_cgi_to_client.find(fd) != _cgi_to_client.end()) {
 		int client_fd = _cgi_to_client[fd];
-		ClientSocket* client = _clients[client_fd];
+		// 정합성 가드: client 가 이미 사라진 stale 매핑이면 NULL 역참조 회피.
+		// 이 상태에 도달하면 어딘가에 cleanup 누락이 있다는 신호 — 로그로 표식.
+		std::map<int, ClientSocket*>::iterator cit = _clients.find(client_fd);
+		if (cit == _clients.end() || cit->second == NULL) {
+			std::cerr << "[cgi] stale mapping cgi_fd=" << fd
+					  << " client_fd=" << client_fd << " (cleanup)" << std::endl;
+			removeCgi(fd);
+			return;
+		}
+		ClientSocket* client = cit->second;
 
 		// EPOLLOUT: write pipe → CGI stdin에 body 전송
 		if (evs & EPOLLOUT)
