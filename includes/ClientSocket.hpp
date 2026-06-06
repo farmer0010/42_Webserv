@@ -51,6 +51,8 @@ class ClientSocket
 		RequestHandler	_request_handler;
 
 		std::string			extractRawHeader(const std::string& key) const;
+		std::string			extractRawUri() const;
+		size_t				resolveMaxBodySize() const;
 		size_t				countRawHeader(const std::string& key) const;
 		bool				parseContentLength(const std::string& cl_str, size_t& out) const;
 		int					validateHeaders() const;
