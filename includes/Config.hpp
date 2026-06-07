@@ -6,7 +6,9 @@
 # include <map>
 # include <iostream>
 # include <stdexcept>
+#include  <limits>
 
+#define LOCATION_BODY_SIZE_UNSET (std::numeric_limits<size_t>::max())
 class Location
 {
 	private:
@@ -17,7 +19,8 @@ class Location
 		bool						_autoindex;
 		std::string					_cgi_path;
 		std::string					_cgi_extension;
-		std::string					_return_url;	
+		std::string					_return_url;
+		size_t						_client_max_body_size;
 	public:
 		Location();
 		~Location();
@@ -39,6 +42,8 @@ class Location
 		void setCgiExtension(const std::string& e) { _cgi_extension = e; }
 		const std::string& getReturnUrl() const { return _return_url; }
 		void setReturnUrl(const std::string& u) { _return_url = u; }
+		size_t getClientMaxBodySize() const { return _client_max_body_size; }
+		void setClientMaxBodySize(size_t size) { _client_max_body_size = size; }
 };
 
 class ServerBlock

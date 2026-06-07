@@ -211,6 +211,15 @@ Config ConfigParser::parse() {
                             loc.setReturnUrl(_tokens[i++]);
                             if (i >= _tokens.size() || _tokens[i++] != ";") throw std::runtime_error(err(i, "Expected ';'"));
                         }
+                        else if (_tokens[i] == "client_max_body_size") {
+                            i++;
+                            size_t sz;
+                            try { sz = parseSize(_tokens[i]); }
+                            catch (const std::exception& e) { throw std::runtime_error(err(i, e.what())); }
+                            loc.setClientMaxBodySize(sz);
+                            i++;
+                            if (i >= _tokens.size() || _tokens[i++] != ";") throw std::runtime_error(err(i, "Expected ';'"));
+                        }
                         else {
                             throw std::runtime_error(err(i, "unknown directive in location: " + _tokens[i]));
                         }
