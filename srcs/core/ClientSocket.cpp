@@ -78,6 +78,11 @@ size_t ClientSocket::resolveMaxBodySize() const
 	const ServerBlock* block = selectServerBlockFromBuffer();
 	if (!block)
 		return 0;
+	try {
+		const Location& loc = block->getLocationForUri(extractRawUri());
+		size_t loc_size = loc.getClientMaxBodySize();
+		if (loc_size != LOCATION_BODY_SIZE_UNSET) return loc_size;
+	} catch (...) {}
 	return block->getClientMaxBodySize();
 }
 
