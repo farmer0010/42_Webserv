@@ -7,10 +7,17 @@
 #include <iostream>
 #include <arpa/inet.h>
 
+// 역할: epoll fd 를 무효값(-1)으로 두고 컨테이너만 비워둔 상태로 만든다.
+// 책임: 실제 리소스 획득은 init() 으로 위임. 소멸자에서 안전한 close 분기가 가능하도록
+//       "아직 아무것도 보유하지 않음" 을 보장.
 ServerManager::ServerManager() : _epoll_fd(-1)
 {
 }
 
+// 역할: 프로세스 종료 직전 보유 중인 epoll/서버/클라이언트 핸들을 한 번에 정리.
+// 책임: ServerManager 가 소유한 동적 객체(ServerSocket*, ClientSocket*) 의 수명 종결자.
+//       CGI 매핑은 ClientSocket 정리 과정에서 removeClient → removeCgi 경로로 정리되거나,
+//       프로세스 종료와 함께 소멸하므로 여기서 별도 sweep 하지 않는다.
 ServerManager::~ServerManager()
 {
 	if (_epoll_fd >= 0)
@@ -21,12 +28,18 @@ ServerManager::~ServerManager()
 		delete it->second;
 }
 
+// 역할: Config 의 서버블록을 (host, port) 키로 그룹화해 ServerSocket 인스턴스를 만들고,
+//       각 listen fd 를 epoll 에 등록한다.
+// 책임: 네트워크 레이어의 "기동" 단계. 동일 host:port 에 묶인 서버블록 리스트를
+//       ServerSocket 에 넘겨 보관하게 하여, 이후 Host 헤더 매칭은 ClientSocket 이
+//       해당 리스트에서 선택하도록 한다. 부분 실패 시 이미 생성된 ServerSocket 은
+//       소멸자에서 자동 회수되도록 _servers 에 등록 후 throw.
 void ServerManager::init(const Config& config)
 {
 	_epoll_fd = epoll_create(1);
 	if (_epoll_fd < 0)
 		throw std::runtime_error("epoll_create() failed");
-	// 서버 블록을 ip+port로 그룹화
+
 	const std::vector<ServerBlock>& serverBlocks = config.getServerBlocks();
 	std::map<std::pair<std::string, int>, std::vector<const ServerBlock*> > grouping;
 	for (size_t i = 0; i < serverBlocks.size(); ++i) {
@@ -34,7 +47,6 @@ void ServerManager::init(const Config& config)
 		grouping[key].push_back(&serverBlocks[i]);
 	}
 
-	// 서버 소켓 생성 및 초기화
 	std::map<std::pair<std::string, int>, std::vector<const ServerBlock*> >::iterator it;
 	for (it = grouping.begin(); it != grouping.end(); ++it) {
 		ServerSocket* server = new ServerSocket();
@@ -48,7 +60,6 @@ void ServerManager::init(const Config& config)
 		}
 	}
 
-	// 서버 소켓을 epoll에 등록
 	for (std::map<int, ServerSocket*>::iterator sit = _servers.begin(); sit != _servers.end(); ++sit) {
 		struct epoll_event event;
 		event.events = EPOLLIN;
@@ -58,12 +69,15 @@ void ServerManager::init(const Config& config)
 	}
 }
 
+// 역할: 무한 이벤트 루프. epoll_wait 로 준비된 fd 를 모아 dispatchEvents 에 흘리고,
+//       매 사이클 sweepTimeouts 로 만료된 연결을 회수.
+// 책임: 단일 epoll 인스턴스에 모든 I/O 를 모으는 reactor 의 진입점. 실제 I/O 처리는
+//       ClientSocket/ServerSocket 으로 위임하고, 여기서는 분배와 주기 작업만 담당한다.
 void ServerManager::run()
 {
 	struct epoll_event events[MAX_EVENTS];
 
 	while (true) {
-		// 인터벌을 두어 idle/CGI 만료 sweep 이 주기적으로 돌 수 있게 함
 		int event_count = epoll_wait(_epoll_fd, events, MAX_EVENTS, EPOLL_WAIT_INTERVAL_MS);
 		if (event_count < 0)
 			continue;
@@ -73,6 +87,9 @@ void ServerManager::run()
 	}
 }
 
+// 역할: 리스닝 fd 에서 한 건 accept, 논블로킹 전환 후 ClientSocket 을 만들고 epoll 에 등록.
+// 책임: "새 클라이언트" 가 시스템에 진입하는 유일 경로. 등록 실패 시 즉시 fd/객체를
+//       회수해 매핑 누수와 stale fd 가 epoll 에 남지 않도록 한다.
 void ServerManager::handleAccept(int server_fd)
 {
 	struct sockaddr_in client_addr;
@@ -107,16 +124,16 @@ void ServerManager::handleAccept(int server_fd)
 			  << ":" << ntohs(client_addr.sin_port) << std::endl;
 }
 
+// 역할: 클라이언트 fd 한 건과 이에 묶인 CGI 자식/파이프/매핑까지 일괄 정리.
+// 책임: ClientSocket 의 단일 종결 경로. _cgi_to_client 의 stale 엔트리 sweep,
+//       살아있는 CGI 자식의 SIGKILL+reap, epoll 제거, 객체 해제 순으로 진행하여
+//       이후 사이클에서 NULL 역참조나 좀비/orphan 이 생기지 않도록 보장.
 void ServerManager::removeClient(int client_fd)
 {
 	std::map<int, ClientSocket*>::iterator it = _clients.find(client_fd);
 	if (it == _clients.end())
 		return;
 
-	// 이 client 를 참조하는 _cgi_to_client 잔존 엔트리 일괄 정리.
-	// 정상 흐름에선 호출자가 미리 정리하지만, 누락 경로(예: client 분기 state==DONE)에서
-	// stale 엔트리가 남으면 다음 epoll 사이클에서 _clients[client_fd]==NULL 역참조로
-	// SIGSEGV. 여기서 마지막 가드.
 	std::vector<int> orphan_cgi_fds;
 	for (std::map<int, int>::iterator cit = _cgi_to_client.begin();
 		 cit != _cgi_to_client.end(); ++cit) {
@@ -126,8 +143,6 @@ void ServerManager::removeClient(int client_fd)
 	for (size_t i = 0; i < orphan_cgi_fds.size(); ++i)
 		removeCgi(orphan_cgi_fds[i]);
 
-	// 살아있는 CGI 자식이 있으면 SIGKILL + 블로킹 waitpid 로 좀비/orphan 방지.
-	// kill 직후라 블로킹해도 즉시 reap.
 	pid_t pid = it->second->getCgiPid();
 	if (pid > 0) {
 		kill(pid, SIGKILL);
@@ -140,8 +155,9 @@ void ServerManager::removeClient(int client_fd)
 	std::cout << "[close] client fd=" << client_fd << std::endl;
 }
 
-// CGI 파이프 fd를 non-blocking으로 설정 후 epoll에 등록.
-// 실패 시 false 반환 — 호출자가 클라이언트를 정리해야 함.
+// 역할: CGI 파이프 fd 를 논블로킹으로 만들고 epoll 에 등록 + cgi→client 매핑 기록.
+// 책임: CGI 가 단일 epoll 루프에 통합되는 진입점. 실패 시 false 만 돌려주고 정리
+//       책임은 호출자(dispatchEvents) 에 위임 — 부분 등록 상태가 남지 않도록 한다.
 bool ServerManager::addCgiFd(int cgi_fd, int client_fd, uint32_t events)
 {
 	int flags = fcntl(cgi_fd, F_GETFL, 0);
@@ -157,13 +173,17 @@ bool ServerManager::addCgiFd(int cgi_fd, int client_fd, uint32_t events)
 	return true;
 }
 
-// CGI 파이프 fd를 epoll에서 제거하고 닫기
+// 역할: CGI 파이프 fd 를 epoll 에서 떼고 cgi→client 매핑을 지운다.
+// 책임: 파이프 fd 자체의 close 는 ClientSocket(또는 Cgi) 측 소유이므로 여기서는 닫지 않는다.
+//       매핑/이벤트 등록만 ServerManager 의 책임.
 void ServerManager::removeCgi(int cgi_fd)
 {
 	epoll_ctl(_epoll_fd, EPOLL_CTL_DEL, cgi_fd, NULL);
 	_cgi_to_client.erase(cgi_fd);
 }
 
+// 역할: 이미 등록된 fd 의 관심 이벤트 마스크를 교체(EPOLL_CTL_MOD).
+// 책임: READING↔WRITING 전환 같은 상태 변화에 따른 epoll 모드 갱신만 담당.
 void ServerManager::setEpollEvents(int fd, uint32_t events)
 {
 	struct epoll_event event;
@@ -172,10 +192,10 @@ void ServerManager::setEpollEvents(int fd, uint32_t events)
 	epoll_ctl(_epoll_fd, EPOLL_CTL_MOD, fd, &event);
 }
 
-// run 루프가 매 cycle 호출. 만료된 클라이언트(idle 또는 CGI 실행시간 초과)를 정리.
-// - idle: 마지막 read/write 로부터 CLIENT_IDLE_TIMEOUT 초 경과
-// - CGI:  cgi 시작 시점으로부터 CGI_TIMEOUT 초 경과 → 자식 SIGKILL 후 회수
-// 응답은 보내지 않고 즉시 종료 (504 등 응답은 후속 작업)
+// 역할: 매 이벤트 루프 사이클에서 만료된 클라이언트(idle 한도 초과 또는 CGI 실행시간 초과)를 정리.
+// 책임: 정상 응답 흐름에 끼어들지 않고 백그라운드 sweep 만 담당. 만료 사유와 무관하게
+//       클라이언트는 응답 없이 종료(추후 504 등 응답 합류 가능). CGI 자식은 SIGKILL + reap 으로
+//       좀비/매달림 방지.
 void ServerManager::sweepTimeouts()
 {
 	if (_clients.empty())
@@ -206,7 +226,6 @@ void ServerManager::sweepTimeouts()
 		std::cerr << "[timeout] fd=" << fd
 				  << (cgi_expired ? " (cgi)" : " (idle)") << std::endl;
 
-		// CGI 가 살아있으면 SIGKILL 로 강제 종료 후 회수
 		pid_t pid = client->getCgiPid();
 		if (pid > 0) {
 			kill(pid, SIGKILL);
@@ -220,20 +239,21 @@ void ServerManager::sweepTimeouts()
 	}
 }
 
+// 역할: epoll_wait 에서 빠져나온 단일 이벤트를 fd 종류(서버/CGI/클라이언트)별로 분기 처리.
+// 책임: I/O 자체는 ClientSocket 으로 위임하고, ServerManager 는 상태 전이(ClientState)에 따른
+//       epoll 등록/해제와 CGI 파이프 라이프사이클(자식 reap 포함)만 조율한다.
+//       peer 종료(EPOLLERR/EPOLLHUP) 동반 시에도 같은 사이클의 EPOLLIN/OUT 을 먼저 처리해
+//       마지막 응답 드레인 기회를 보장한다.
 void ServerManager::dispatchEvents(int fd, uint32_t evs)
 {
-	// 서버 소켓: 새 연결 수락
 	if (_servers.find(fd) != _servers.end()) {
 		if (evs & EPOLLIN)
 			handleAccept(fd);
 		return;
 	}
 
-	// CGI 파이프 fd: CGI 프로세스와의 I/O 처리
 	if (_cgi_to_client.find(fd) != _cgi_to_client.end()) {
 		int client_fd = _cgi_to_client[fd];
-		// 정합성 가드: client 가 이미 사라진 stale 매핑이면 NULL 역참조 회피.
-		// 이 상태에 도달하면 어딘가에 cleanup 누락이 있다는 신호 — 로그로 표식.
 		std::map<int, ClientSocket*>::iterator cit = _clients.find(client_fd);
 		if (cit == _clients.end() || cit->second == NULL) {
 			std::cerr << "[cgi] stale mapping cgi_fd=" << fd
@@ -243,14 +263,10 @@ void ServerManager::dispatchEvents(int fd, uint32_t evs)
 		}
 		ClientSocket* client = cit->second;
 
-		// EPOLLOUT: write pipe → CGI stdin에 body 전송
 		if (evs & EPOLLOUT)
 			client->handleCgiWrite();
-		// EPOLLIN | EPOLLHUP: read pipe → CGI stdout 읽기
-		// EPOLLHUP는 CGI 프로세스 종료 신호, 남은 데이터를 다 읽을 때까지 처리
 		if (evs & (EPOLLIN | EPOLLHUP))
 			client->handleCgiRead();
-		// EPOLLERR: 파이프 에러 → 연결 정리
 		if ((evs & EPOLLERR) && !(evs & EPOLLIN)) {
 			removeCgi(fd);
 			removeClient(client_fd);
@@ -259,20 +275,16 @@ void ServerManager::dispatchEvents(int fd, uint32_t evs)
 
 		ClientState state = client->getState();
 		if (state == CGI_READING_OUTPUT) {
-			// write 완료: write pipe fd 제거, read pipe fd 등록
 			removeCgi(fd);
 			int read_fd = client->getCgiReadFd();
 			if (read_fd < 0 || !addCgiFd(read_fd, client_fd, EPOLLIN)) {
-				// read pipe 등록 실패 → 무한 매달림 방지를 위해 즉시 정리
 				std::cerr << "[cgi] addCgiFd(read) failed client_fd=" << client_fd << std::endl;
 				pid_t pid = client->getCgiPid();
 				if (pid > 0) { kill(pid, SIGKILL); waitpid(pid, NULL, 0); }
 				removeClient(client_fd);
 			}
 		} else if (state == WRITING) {
-			// CGI 출력 수신 완료: read pipe fd 제거, 클라이언트 fd를 EPOLLOUT으로 전환
 			removeCgi(fd);
-			// CGI 정상 종료(EOF) 시점: 자식 회수
 			pid_t pid = client->getCgiPid();
 			if (pid > 0)
 				waitpid(pid, NULL, WNOHANG);
@@ -287,15 +299,9 @@ void ServerManager::dispatchEvents(int fd, uint32_t evs)
 		return;
 	}
 
-	// 클라이언트 소켓: 읽기/쓰기 처리
 	if (_clients.find(fd) != _clients.end()) {
 		ClientSocket* client = _clients[fd];
 
-		// EPOLLERR / EPOLLHUP 는 peer 종료 신호. 다만 같은 dispatch 에 EPOLLIN 이
-		// 동반된 경우(마지막 요청 직후 FIN) 즉시 종료하면 마지막 요청 데이터를
-		// 드레인하기 전에 닫혀 응답이 못 나간다. 먼저 read/write 를 처리한 뒤,
-		// 더 송신할 게 없을 때만 정리한다. recv == 0 이면 handleRead 가 _state 를
-		// DONE 으로 전이시키므로 정상 흐름에 맡길 수 있음.
 		bool peer_gone = (evs & (EPOLLERR | EPOLLHUP)) != 0;
 
 		if (evs & EPOLLIN)
@@ -305,7 +311,6 @@ void ServerManager::dispatchEvents(int fd, uint32_t evs)
 
 		ClientState state = client->getState();
 
-		// peer 가 닫혔고 송신 잔여가 없으면(또는 에러) 즉시 정리
 		if (peer_gone && state != WRITING) {
 			int write_fd = client->getCgiWriteFd();
 			int read_fd  = client->getCgiReadFd();
@@ -321,10 +326,8 @@ void ServerManager::dispatchEvents(int fd, uint32_t evs)
 		if (state == WRITING)
 			setEpollEvents(fd, EPOLLOUT);
 		else if (state == CGI_WRITING_BODY) {
-			// processRequest가 CGI 진입: write pipe fd를 epoll에 등록
 			int write_fd = client->getCgiWriteFd();
 			if (write_fd < 0 || !addCgiFd(write_fd, fd, EPOLLOUT)) {
-				// write pipe 등록 실패 → CGI 고아 방지를 위해 즉시 정리
 				std::cerr << "[cgi] addCgiFd(write) failed client_fd=" << fd << std::endl;
 				pid_t pid = client->getCgiPid();
 				if (pid > 0) { kill(pid, SIGKILL); waitpid(pid, NULL, 0); }
@@ -333,7 +336,7 @@ void ServerManager::dispatchEvents(int fd, uint32_t evs)
 				removeClient(fd);
 			}
 		}
-		else if (state == READING)   // keep-alive
+		else if (state == READING)
 			setEpollEvents(fd, EPOLLIN);
 		else if (state == DONE)
 			removeClient(fd);

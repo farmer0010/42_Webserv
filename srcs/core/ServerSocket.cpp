@@ -1,17 +1,24 @@
 #include "ServerSocket.hpp"
 
+// 역할: 멤버 fd 만 무효값(-1)으로 두는 가벼운 초기화.
+// 책임: 실제 리소스 획득은 init() 에 위임. 객체 수명 동안 잘못된 close 호출이
+//       발생하지 않도록 -1 상태를 보장하는 것만 담당.
 ServerSocket::ServerSocket() : _server_fd(-1)
 {
 }
 
+// 역할: 지정 host:port 에 TCP 리스닝 소켓을 띄우고 논블로킹 상태로 만들며,
+//       이 엔드포인트에 라우팅될 ServerBlock 목록을 보관.
+// 책임: 소켓 생성/SO_REUSEADDR/bind/listen/F_SETFL 흐름을 한 번에 묶어 ServerManager
+//       가 epoll 에 등록만 하면 되는 상태까지 준비. 실패는 예외로 호출자에게 보고하고,
+//       부분 성공 시점에 잡힌 fd 는 throw 직전 close 로 누수 방지.
+//       서버블록 매칭 로직(Host 헤더 기반)은 ClientSocket 책임이라 여기선 보관만 함.
 void ServerSocket::init(std::string host, int port, const std::vector<const ServerBlock*>& serverBlocks)
 {
 	int flags;
 
-	// 서버 블록 저장 (포트+ip로 그룹화된 서버블록이 전달됨)
 	this->_server_blocks = serverBlocks;
 
-	// 소켓 주소 구조체 초기화
 	struct addrinfo hints, *res;
 	memset(&hints, 0, sizeof(hints));
 	hints.ai_family = AF_INET;
@@ -24,35 +31,29 @@ void ServerSocket::init(std::string host, int port, const std::vector<const Serv
 	_address.sin_port = htons(port);
 	freeaddrinfo(res);
 
-	// 소켓 생성
 	if ((this->_server_fd = socket(AF_INET, SOCK_STREAM, 0)) < 0){
 		throw std::runtime_error("ServerSocket: socket() failed");
 	}
 
-	// 소켓 옵션 설정 (포트 재사용 설정)
 	int opt = 1;
 	if (setsockopt(this->_server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0){
 		throw std::runtime_error("setsockopt() failed");
 	}
 
-	// 소켓 바인딩
 	if (bind(this->_server_fd, reinterpret_cast<struct sockaddr*>(&_address), sizeof(_address)) < 0){
 		throw std::runtime_error("bind() failed");
 	}
 
-	// 기존 소켓 플래그 가져오기
 	flags = fcntl(_server_fd, F_GETFL, 0);
 	if (flags < 0){
 		throw std::runtime_error("fcntl()/read_curr flag failed");
 	}
 
-	// 소켓을 논블로킹 모드로 설정
 	if (fcntl(_server_fd, F_SETFL, flags | O_NONBLOCK) == -1){
 		close(_server_fd);
 		throw std::runtime_error("fcntl()/change NonBlocking failed");
 	}
 
-	// 소켓을 수신 대기 상태로 설정
 	if (listen(_server_fd, SOMAXCONN) < 0){
 		close(_server_fd);
 		throw std::runtime_error("listen() failed");
@@ -62,9 +63,11 @@ void ServerSocket::init(std::string host, int port, const std::vector<const Serv
 			  << " (fd=" << _server_fd << ")" << std::endl;
 }
 
+// 역할: 보유 중인 listen fd 가 유효하면 close.
+// 책임: ServerManager 가 ServerSocket 컨테이너를 파괴할 때 자동으로 호출되어
+//       프로세스 종료 직전까지 살아있는 리스닝 fd 의 안전한 회수를 보장.
 ServerSocket::~ServerSocket()
 {
 	if (this->_server_fd >= 0)
 		close(_server_fd);
 }
-
