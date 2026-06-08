@@ -6,6 +6,7 @@
 #include <iostream>
 #include <fcntl.h>
 #include <cerrno>
+#include <cctype>
 
 Cgi::Cgi(const HttpRequest& req, const std::string& path) 
     : request(req), script_path(path), envp(NULL), pid(-1), sent_body_size(0) {
@@ -24,36 +25,72 @@ Cgi::~Cgi() {
     if (pipe_in[0] != -1) { 
         close(pipe_in[0]); 
         pipe_in[0] = -1; }
-    if (pipe_in[1] != -1) {
-         close(pipe_in[1]); 
-         pipe_in[1] = -1; }
+    if (pipe_in[1] != -1) { 
+        close(pipe_in[1]); 
+        pipe_in[1] = -1; }
     if (pipe_out[0] != -1) {
-         close(pipe_out[0]);
-          pipe_out[0] = -1; }
+        close(pipe_out[0]);
+        pipe_out[0] = -1; }
     if (pipe_out[1] != -1) { 
         close(pipe_out[1]); 
         pipe_out[1] = -1; }
 }
 
 void Cgi::initEnv() {
-    this->env_map["REQUEST_METHOD"] = this->request.getMethod();
+    std::string uri = this->request.getUri();
+    size_t q = uri.find('?');
+    std::string path_part = (q == std::string::npos) ? uri : uri.substr(0, q);
+    std::string query_part = (q == std::string::npos) ? "" : uri.substr(q + 1);
+
+    this->env_map["GATEWAY_INTERFACE"] = "CGI/1.1";
     this->env_map["SERVER_PROTOCOL"] = "HTTP/1.1";
-    this->env_map["PATH_INFO"] = this->script_path;
-    
-    std::string full_uri = this->request.getUri();
-    size_t question_mark_pos = full_uri.find('?');
-    if (question_mark_pos != std::string::npos) {
-        this->env_map["QUERY_STRING"] = full_uri.substr(question_mark_pos + 1);
-    } else {
-        this->env_map["QUERY_STRING"] = "";
+    this->env_map["SERVER_SOFTWARE"] = "webserv/0.1";
+    this->env_map["REQUEST_METHOD"] = this->request.getMethod();
+    this->env_map["REQUEST_URI"] = uri;
+    this->env_map["SCRIPT_NAME"] = path_part;
+    this->env_map["SCRIPT_FILENAME"] = this->script_path;
+    this->env_map["PATH_INFO"] = "";
+    this->env_map["QUERY_STRING"] = query_part;
+
+    std::string host_val = "";
+    const std::map<std::string, std::string>& h = this->request.getHeaders();
+    std::map<std::string, std::string>::const_iterator host_it = h.find("host");
+    if (host_it != h.end()) {
+        host_val = host_it->second;
+    }
+    std::string server_name = host_val;
+    std::string server_port = "80";
+    size_t colon = host_val.find(':');
+    if (colon != std::string::npos) {
+        server_name = host_val.substr(0, colon);
+        server_port = host_val.substr(colon + 1);
+    }
+    this->env_map["SERVER_NAME"] = server_name;
+    this->env_map["SERVER_PORT"] = server_port;
+    this->env_map["REMOTE_ADDR"] = "127.0.0.1";
+
+    for (std::map<std::string, std::string>::const_iterator it = h.begin(); it != h.end(); ++it) {
+        std::string key = "HTTP_" + it->first;
+        for (size_t i = 0; i < key.size(); ++i) {
+            if (key[i] == '-') {
+                key[i] = '_';
+            } else {
+                key[i] = std::toupper(key[i]);
+            }
+        }
+        if (key == "HTTP_CONTENT_LENGTH" || key == "HTTP_CONTENT_TYPE") {
+            continue;
+        }
+        this->env_map[key] = it->second;
     }
 
-    std::map<std::string, std::string> headers = this->request.getHeaders();
-    if (headers.count("content-length")) {
-        this->env_map["CONTENT_LENGTH"] = headers["content-length"];
+    std::map<std::string, std::string>::const_iterator cl_it = h.find("content-length");
+    if (cl_it != h.end()) {
+        this->env_map["CONTENT_LENGTH"] = cl_it->second;
     }
-    if (headers.count("content-type")) {
-        this->env_map["CONTENT_TYPE"] = headers["content-type"];
+    std::map<std::string, std::string>::const_iterator ct_it = h.find("content-type");
+    if (ct_it != h.end()) {
+        this->env_map["CONTENT_TYPE"] = ct_it->second;
     }
 }
 
@@ -173,7 +210,7 @@ ssize_t Cgi::readFromPipe() {
         return 0;
     
     char buffer[4096];
-    ssize_t bytes = read(pipe_out[0], buffer, sizeof(buffer));
+	ssize_t bytes = read(pipe_out[0], buffer, sizeof(buffer));
 
     if (bytes > 0) {
         response_buffer.insert(response_buffer.end(), buffer, buffer + bytes);
