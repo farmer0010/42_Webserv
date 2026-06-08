@@ -18,12 +18,21 @@ Cgi::Cgi(const HttpRequest& req, const std::string& path)
 
 Cgi::~Cgi() {
     freeEnv();
-    if(this ->pid > 0) {
+    if (this->pid > 0) {
         waitpid(this->pid, NULL, WNOHANG);
     }
-    if (pipe_in[0] != -1) close(pipe_in[0]);
-    if (pipe_in[1] != -1) close(pipe_in[1]);
-    if (pipe_out[0] != -1) close(pipe_out[0]);
+    if (pipe_in[0] != -1) { 
+        close(pipe_in[0]); 
+        pipe_in[0] = -1; }
+    if (pipe_in[1] != -1) {
+         close(pipe_in[1]); 
+         pipe_in[1] = -1; }
+    if (pipe_out[0] != -1) {
+         close(pipe_out[0]);
+          pipe_out[0] = -1; }
+    if (pipe_out[1] != -1) { 
+        close(pipe_out[1]); 
+        pipe_out[1] = -1; }
 }
 
 void Cgi::initEnv() {
@@ -77,7 +86,7 @@ bool Cgi::execute() {
         close(pipe_in[0]); 
         close(pipe_in[1]);
         pipe_in[0] = -1;
-         pipe_in[1] = -1;
+        pipe_in[1] = -1;
         return false;
     }
 
@@ -88,6 +97,8 @@ bool Cgi::execute() {
     if (pid == -1) {
         close(pipe_in[0]); close(pipe_in[1]);
         close(pipe_out[0]); close(pipe_out[1]);
+        pipe_in[0] = -1; pipe_in[1] = -1;
+        pipe_out[0] = -1; pipe_out[1] = -1;
         return false;
     }
 
@@ -121,6 +132,8 @@ bool Cgi::execute() {
     } else {
         close(pipe_in[0]);
         close(pipe_out[1]);
+        pipe_in[0] = -1;
+        pipe_out[1] = -1;
         return true;
     }
 }
