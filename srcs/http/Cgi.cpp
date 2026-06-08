@@ -7,6 +7,7 @@
 #include <fcntl.h>
 #include <cerrno>
 #include <cctype>
+#include <sstream>
 
 Cgi::Cgi(const HttpRequest& req, const std::string& path) 
     : request(req), script_path(path), envp(NULL), pid(-1), sent_body_size(0) {
@@ -84,9 +85,13 @@ void Cgi::initEnv() {
         this->env_map[key] = it->second;
     }
 
-    std::map<std::string, std::string>::const_iterator cl_it = h.find("content-length");
-    if (cl_it != h.end()) {
-        this->env_map["CONTENT_LENGTH"] = cl_it->second;
+    const std::vector<char>& body = this->request.getBody();
+    if (!body.empty()) {
+        std::stringstream ss;
+        ss << body.size();
+        this->env_map["CONTENT_LENGTH"] = ss.str();
+    } else {
+        this->env_map["CONTENT_LENGTH"] = "0";
     }
     std::map<std::string, std::string>::const_iterator ct_it = h.find("content-type");
     if (ct_it != h.end()) {
