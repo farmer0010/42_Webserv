@@ -1,0 +1,13 @@
+# Claude Code 로컬 설정
+.claude/
+
+# IDE 설정
+.idea/
+
+# 빌드 산출물
+objs/
+webserv
+*.o
+
+# 업로드 테스트 산출물
+www/uploads/*

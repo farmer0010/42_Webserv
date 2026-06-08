@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+	<meta charset="UTF-8">
+	<title>Uploads — 42_Webserv</title>
+	<style>
+		body { font-family: -apple-system, system-ui, sans-serif; max-width: 720px; margin: 40px auto; padding: 0 20px; color: #222; }
+		h1 { border-bottom: 2px solid #222; padding-bottom: 8px; }
+		section { margin: 28px 0; }
+		h2 { font-size: 1.1em; color: #444; }
+		form { background: #f9f9f9; padding: 16px; border-radius: 6px; border: 1px solid #ddd; }
+		input[type=file] { width: 100%; margin: 6px 0 12px; box-sizing: border-box; padding: 6px; }
+		button { background: #222; color: #fff; border: 0; padding: 6px 14px; border-radius: 4px; cursor: pointer; font-size: 0.9em; }
+		button:hover { background: #444; }
+		button.danger { background: #c0392b; }
+		button.danger:hover { background: #962d22; }
+		.muted { color: #888; font-size: 0.9em; }
+		.file-list { list-style: none; padding: 0; }
+		.file-list li { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; border: 1px solid #eee; border-radius: 4px; margin: 6px 0; }
+		.file-list li.selected { background: #fffbe6; border-color: #f1c40f; }
+		.file-list a { color: #222; text-decoration: none; flex: 1; word-break: break-all; }
+		.file-list a:hover { text-decoration: underline; }
+		.empty { color: #aaa; font-style: italic; padding: 16px; text-align: center; border: 1px dashed #ddd; border-radius: 4px; }
+		.status { margin-top: 12px; padding: 10px 12px; border-radius: 4px; font-size: 0.9em; display: none; }
+		.status.ok { background: #e8f5e9; color: #2e7d32; display: block; }
+		.status.err { background: #ffebee; color: #c62828; display: block; }
+		.toolbar { display: flex; gap: 8px; margin-bottom: 12px; }
+	</style>
+</head>
+<body>
+	<h1>Uploads</h1>
+	<p class="muted"><a href="/">← 홈으로</a> · 파일 클릭 = 다운로드/보기, 삭제 버튼 = DELETE</p>
+
+	<section>
+		<h2>업로드</h2>
+		<form id="upload-form" enctype="multipart/form-data">
+			<label>파일</label>
+			<input type="file" name="file" required>
+			<button type="submit">Upload</button>
+		</form>
+	</section>
+
+	<section>
+		<h2>파일 목록</h2>
+		<div class="toolbar">
+			<button id="refresh-btn">↻ 새로고침</button>
+		</div>
+		<ul id="files" class="file-list"></ul>
+		<div id="empty" class="empty" style="display:none;">업로드된 파일이 없습니다.</div>
+		<div id="status" class="status"></div>
+	</section>
+
+<script>
+const UPLOADS = '/uploads/';
+const LIST_URL = '/cgi-bin/list_uploads.py';
+const listEl = document.getElementById('files');
+const emptyEl = document.getElementById('empty');
+const statusEl = document.getElementById('status');
+
+function showStatus(msg, ok) {
+	statusEl.textContent = msg;
+	statusEl.className = 'status ' + (ok ? 'ok' : 'err');
+	setTimeout(function(){ statusEl.className = 'status'; }, 3000);
+}
+
+function formatSize(n) {
+	if (n < 1024) return n + ' B';
+	if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+	return (n / 1024 / 1024).toFixed(1) + ' MB';
+}
+
+async function loadFiles() {
+	try {
+		const res = await fetch(LIST_URL);
+		if (!res.ok) {
+			listEl.innerHTML = '';
+			emptyEl.style.display = 'block';
+			showStatus('목록 로드 실패: ' + res.status, false);
+			return;
+		}
+		const data = await res.json();
+		if (data.error) showStatus('목록 오류: ' + data.error, false);
+		render(data.files || []);
+	} catch (e) {
+		showStatus('네트워크/파싱 오류: ' + e.message, false);
+	}
+}
+
+function render(files) {
+	listEl.innerHTML = '';
+	if (files.length === 0) {
+		emptyEl.style.display = 'block';
+		return;
+	}
+	emptyEl.style.display = 'none';
+	files.forEach(function(f){
+		const li = document.createElement('li');
+		const a = document.createElement('a');
+		a.href = UPLOADS + encodeURIComponent(f.name);
+		a.textContent = f.name + '  ';
+		a.target = '_blank';
+		const sizeSpan = document.createElement('span');
+		sizeSpan.className = 'muted';
+		sizeSpan.textContent = '(' + formatSize(f.size) + ')';
+		a.appendChild(sizeSpan);
+		const btn = document.createElement('button');
+		btn.className = 'danger';
+		btn.textContent = '삭제';
+		btn.onclick = function(){ deleteFile(f.name, li); };
+		li.appendChild(a);
+		li.appendChild(btn);
+		li.onclick = function(e){
+			if (e.target === btn) return;
+			document.querySelectorAll('.file-list li').forEach(function(x){ x.classList.remove('selected'); });
+			li.classList.add('selected');
+		};
+		listEl.appendChild(li);
+	});
+}
+
+async function deleteFile(name, li) {
+	if (!confirm('"' + name + '" 을 삭제할까요?')) return;
+	try {
+		const res = await fetch(UPLOADS + encodeURIComponent(name), { method: 'DELETE' });
+		if (res.ok) {
+			showStatus('삭제 성공: ' + name + ' (' + res.status + ')', true);
+			li.remove();
+			if (listEl.children.length === 0) emptyEl.style.display = 'block';
+		} else {
+			showStatus('삭제 실패: ' + name + ' (' + res.status + ')', false);
+		}
+	} catch (e) {
+		showStatus('네트워크 오류: ' + e.message, false);
+	}
+}
+
+document.getElementById('upload-form').addEventListener('submit', async function(e){
+	e.preventDefault();
+	const form = e.target;
+	const fd = new FormData(form);
+	try {
+		const res = await fetch(UPLOADS, { method: 'POST', body: fd });
+		if (res.ok) {
+			showStatus('업로드 성공 (' + res.status + ')', true);
+			form.reset();
+			loadFiles();
+		} else {
+			showStatus('업로드 실패 (' + res.status + ')', false);
+		}
+	} catch (e) {
+		showStatus('네트워크 오류: ' + e.message, false);
+	}
+});
+
+document.getElementById('refresh-btn').addEventListener('click', loadFiles);
+loadFiles();
+</script>
+</body>
+</html>
