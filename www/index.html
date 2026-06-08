@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+	<meta charset="UTF-8">
+	<title>42_Webserv</title>
+	<style>
+		body { font-family: -apple-system, system-ui, sans-serif; max-width: 720px; margin: 40px auto; padding: 0 20px; color: #222; }
+		h1 { border-bottom: 2px solid #222; padding-bottom: 8px; }
+		section { margin: 28px 0; }
+		h2 { font-size: 1.1em; color: #444; }
+		ul { line-height: 1.8; }
+		code { background: #f4f4f4; padding: 2px 6px; border-radius: 3px; font-size: 0.9em; }
+		form { background: #f9f9f9; padding: 16px; border-radius: 6px; border: 1px solid #ddd; }
+		input[type=file], input[type=text] { width: 100%; margin: 6px 0 12px; box-sizing: border-box; padding: 6px; }
+		button { background: #222; color: #fff; border: 0; padding: 8px 16px; border-radius: 4px; cursor: pointer; }
+		button:hover { background: #444; }
+		.muted { color: #888; font-size: 0.9em; }
+	</style>
+</head>
+<body>
+	<h1>42_Webserv</h1>
+	<p class="muted">HTTP/1.1 — listening on 8080</p>
+
+	<section>
+		<h2>Routes</h2>
+		<ul>
+			<li><a href="/">/</a> — index (GET only)</li>
+			<li><a href="/uploads.html">/uploads.html</a> — 업로드/목록/삭제 테스트 UI</li>
+			<li><a href="/error.html">/error.html</a> — 에러 페이지 미리보기 (400/403/404/405/413/5xx)</li>
+			<li><a href="/cgi-bin/hello.py">/cgi-bin/hello.py</a> — CGI (GET)</li>
+			<li><a href="/does-not-exist">/does-not-exist</a> — 404 확인</li>
+		</ul>
+	</section>
+
+	<section>
+		<h2>POST to /uploads</h2>
+		<p class="muted">파일 업로드 후 <code>/uploads/</code> autoindex 에서 확인.</p>
+		<form action="/uploads/" method="post" enctype="multipart/form-data">
+			<label>파일</label>
+			<input type="file" name="file" required>
+			<button type="submit">Upload</button>
+		</form>
+	</section>
+
+	<section>
+		<h2>POST to CGI</h2>
+		<p class="muted">CGI 가 stdin 으로 본문을 받아 echo.</p>
+		<form action="/cgi-bin/hello.py" method="post">
+			<label>메시지</label>
+			<input type="text" name="msg" value="hello cgi" required>
+			<button type="submit">Send</button>
+		</form>
+	</section>
+</body>
+</html>
