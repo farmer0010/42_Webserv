@@ -45,6 +45,15 @@ void RequestHandler::init(const HttpRequest& req, const ServerBlock* config) {
 }
 
 HttpResponse RequestHandler::processRequest() {
+    if (this->_server_config != NULL) {
+        const Location& loc = this->_server_config->getLocationForUri(this->request.getUri());
+        const std::vector<std::string>& allowed = loc.getAllowMethods();
+        if (std::find(allowed.begin(), allowed.end(), this->request.getMethod()) == allowed.end()) {
+            generateErrorPage(405, this->_server_config);
+            return this->response;
+        }
+    }
+
     bool is_cgi = false;
     size_t dot_pos = this->absolute_path.find_last_of('.');
     
@@ -57,7 +66,7 @@ HttpResponse RequestHandler::processRequest() {
 
     if (is_cgi) {
         if (!isFileExists(this->absolute_path)) {
-            generateErrorPage(404);
+            generateErrorPage(404, this->_server_config);
             return this->response;
         }
 
@@ -66,7 +75,7 @@ HttpResponse RequestHandler::processRequest() {
         if (this->cgi->execute() == false) {
             delete this->cgi;
             this->cgi = NULL;
-            generateErrorPage(500);
+            generateErrorPage(500, this->_server_config);
             return this->response;
         }
         return this->response;
@@ -79,7 +88,7 @@ HttpResponse RequestHandler::processRequest() {
         } else if (this->request.getMethod() == "DELETE") {
             handleDelete();
         } else {
-            generateErrorPage(405);
+            generateErrorPage(405, this->_server_config);
         }
     }
     return this->response;
@@ -87,7 +96,7 @@ HttpResponse RequestHandler::processRequest() {
 
 void RequestHandler::handleCgiResponse(const std::vector<char>& cgi_result) {
     if (cgi_result.empty()) {
-        generateErrorPage(500);
+        generateErrorPage(500, this->_server_config);
         return;
     }
 
@@ -123,9 +132,11 @@ void RequestHandler::handleCgiResponse(const std::vector<char>& cgi_result) {
                 }
 
                 if (key == "Status") {
-                    this->response.setStatusCode(std::atoi(value.substr(0, 3).c_str()));
-                    if (value.length() > 4)
-                        this->response.setReasonPhrase(value.substr(4));
+                    if (value.length() >= 3) {
+                        this->response.setStatusCode(std::atoi(value.substr(0, 3).c_str()));
+                        if (value.length() > 4)
+                            this->response.setReasonPhrase(value.substr(4));
+                    }
                 } else {
                     this->response.addHeader(key, value);
                 }
@@ -142,12 +153,12 @@ void RequestHandler::handleCgiResponse(const std::vector<char>& cgi_result) {
 
 void RequestHandler::handleGet() {
     if (!isFileExists(this->absolute_path)) {
-        generateErrorPage(404);
+        generateErrorPage(404, this->_server_config);
         return;
     }
     std::ifstream file(this->absolute_path.c_str(), std::ios::binary);
     if (!file.is_open()) {
-        generateErrorPage(403);
+        generateErrorPage(403, this->_server_config);
         return;
     }
     std::vector<char> file_data((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
@@ -224,7 +235,7 @@ void RequestHandler::handlePost() {
 
     std::ofstream file(target_path.c_str(), std::ios::binary);
     if (!file.is_open()) {
-        generateErrorPage(500);
+        generateErrorPage(500, this->_server_config);
         return;
     }
 
@@ -240,7 +251,7 @@ void RequestHandler::handlePost() {
 
 void RequestHandler::handleDelete() {
     if (!isFileExists(this->absolute_path)) {
-        generateErrorPage(404);
+        generateErrorPage(404, this->_server_config);
         return;
     }
     if (unlink(this->absolute_path.c_str()) == 0) {
@@ -248,7 +259,7 @@ void RequestHandler::handleDelete() {
         this->response.setReasonPhrase("OK");
         this->response.setBody("<h1>File Deleted</h1>");
     } else {
-        generateErrorPage(403);
+        generateErrorPage(403, this->_server_config);
     }
 }
 
@@ -276,21 +287,34 @@ std::string RequestHandler::getMimeType(const std::string& path) {
     return "application/octet-stream"; 
 }
 
-void RequestHandler::generateErrorPage(int status_code) {
+void RequestHandler::generateErrorPage(int status_code, const ServerBlock* config) {
+    this->_server_config = config;
+    this->response.init();
     this->response.setStatusCode(status_code);
-    if (status_code == 404) {
-        this->response.setReasonPhrase("Not Found");
-        this->response.setBody("<h1>404 Not Found</h1>");
-    } else if (status_code == 403) {
-        this->response.setReasonPhrase("Forbidden");
-        this->response.setBody("<h1>403 Forbidden</h1>");
-    } else if (status_code == 405) {
-        this->response.setReasonPhrase("Method Not Allowed");
-        this->response.setBody("<h1>405 Method Not Allowed</h1>");
-    } else if (status_code == 500) {
-        this->response.setReasonPhrase("Internal Server Error");
-        this->response.setBody("<h1>500 Internal Server Error</h1>");
+
+    if (this->_server_config != NULL) {
+        const std::map<int, std::string>& error_pages = this->_server_config->getErrorPages();
+        std::map<int, std::string>::const_iterator it = error_pages.find(status_code);
+        if (it != error_pages.end()) {
+            std::string err_path = "./www" + it->second;
+            try {
+                const Location& loc = this->_server_config->getLocationForUri(it->second);
+                err_path = loc.getRoot() + it->second;
+            } catch (...) {}
+
+            std::ifstream file(err_path.c_str(), std::ios::binary);
+            if (file.is_open()) {
+                std::vector<char> file_data((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+                this->response.setBody(file_data);
+                file.close();
+                return;
+            }
+        }
     }
+
+    std::stringstream ss;
+    ss << "<h1>" << status_code << "</h1>";
+    this->response.setBody(ss.str());
 }
 
 void RequestHandler::clear() {

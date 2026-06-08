@@ -27,7 +27,6 @@ private:
 
     bool isDirectory(const std::string& path);
     bool isFileExists(const std::string& path);
-    void generateErrorPage(int status_code);
 
     std::string getMimeType(const std::string& path);
 
@@ -42,6 +41,7 @@ public:
 
     Cgi* getCgi() const { return cgi; }
     HttpResponse getResponse() const { return response; }
+    void generateErrorPage(int status_code, const ServerBlock* config);
     void clear();
 };
 
