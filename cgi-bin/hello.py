@@ -20,7 +20,7 @@ safe_msg = html.escape(msg)
 
 if safe_msg:
     body = (
-        f"<h1>Hello {safe_msg}</h1>"
+        f"<h1>{safe_msg}</h1>"
         f"<p><a href='/'>홈으로</a></p>"
     )
 else:

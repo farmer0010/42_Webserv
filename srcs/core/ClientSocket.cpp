@@ -2,9 +2,7 @@
 
 #include <limits>
 
-// RFC 7230 §3.2: 헤더 이름은 case-insensitive. extractRawHeader/countRawHeader 가
-// 동일한 lowercase 사본 위에서 일관되게 매칭하도록 file-scope helper 로 공유.
-// std::tolower(int) 가 음수 입력에서 UB 가능하므로 unsigned char 로 가드.
+// 헤더 이름은 case-insensitive해야하는데, 그거 헬퍼함수
 static std::string toLowerAscii(const std::string& s)
 {
 	std::string out(s.size(), '\0');
@@ -14,15 +12,11 @@ static std::string toLowerAscii(const std::string& s)
 }
 
 // 역할: 멤버 fd/카운터/타임스탬프를 0/-1 같은 무효값으로 두고 상태를 READING 으로 시작.
-// 책임: 실제 fd/주소/서버블록 주입은 init() 에 위임. 소멸자에서 안전한 close 분기가
-//       되도록 "아직 아무 리소스도 보유하지 않음" 을 보장.
 ClientSocket::ClientSocket() : _client_fd(-1), _bytes_sent(0), _state(READING), _last_active_time(0), _cgi_start_time(0)
 {
 }
 
 // 역할: 보유 중인 클라이언트 fd 가 유효하면 close.
-// 책임: ServerManager::removeClient 경로에서 객체 해제 시 호출되어, 네트워크 fd 누수가
-//       없도록 마지막 안전망 역할만 담당. CGI/요청 자원은 ServerManager/RequestHandler 가 정리.
 ClientSocket::~ClientSocket()
 {
 	if (_client_fd >= 0)
@@ -30,8 +24,6 @@ ClientSocket::~ClientSocket()
 }
 
 // 역할: accept 직후 ServerManager 가 fd/주소/소속 ServerSocket 을 주입.
-// 책임: 새 연결 단위로 상태 머신을 READING 으로 리셋하고, 이 listen 엔드포인트에
-//       바인딩된 서버블록 후보 목록을 받아 Host 헤더 매칭의 재료를 마련.
 void ClientSocket::init(int client_fd, struct sockaddr_in address, ServerSocket* parent)
 {
 	_client_fd = client_fd;
@@ -44,8 +36,6 @@ void ClientSocket::init(int client_fd, struct sockaddr_in address, ServerSocket*
 }
 
 // 역할: recv_buffer 안에 헤더 종결 마커("\r\n\r\n") 가 들어왔는지 검사.
-// 책임: HttpRequest 파싱을 시도해도 되는 시점인지에 대한 네트워크 레이어 판정.
-//       바이트 누적 여부만 보고, 헤더 의미론적 검증은 validateHeaders/HttpRequest 의 몫.
 bool ClientSocket::isHeaderComplete() const
 {
 	const char* crlf = "\r\n\r\n";
@@ -54,10 +44,6 @@ bool ClientSocket::isHeaderComplete() const
 }
 
 // 역할: 파싱 전 raw recv_buffer 의 헤더 영역에서 특정 키의 값을 잘라 반환.
-// 책임: HttpRequest 가 아직 호출되지 않은 단계(서버블록 선택/Content-Length 검증 등)에서
-//       필요한 헤더 한 건을 얻기 위한 임시 추출. 본격 헤더 처리는 HttpRequest 책임.
-//       RFC 7230 §3.2 case-insensitive 매칭 + §3.2.4 OWS 양쪽 trim 적용.
-//       request-line(첫 줄)은 헤더가 아니므로 항상 "\r\n" + key + ":" 패턴으로 매칭.
 std::string ClientSocket::extractRawHeader(const std::string& key) const
 {
 	const char* crlf = "\r\n\r\n";
@@ -86,8 +72,6 @@ std::string ClientSocket::extractRawHeader(const std::string& key) const
 }
 
 // 역할: raw request-line 에서 URI 토큰만 잘라 반환.
-// 책임: HttpRequest 파싱 전 단계에서 location 매칭(예: resolveMaxBodySize) 에 쓰기 위한
-//       최소한의 추출. 메서드/버전 검증은 HttpRequest 가 담당.
 std::string ClientSocket::extractRawUri() const
 {
 	const char* crlf = "\r\n";
@@ -104,8 +88,6 @@ std::string ClientSocket::extractRawUri() const
 }
 
 // 역할: nginx 우선순위(location > server) 로 client_max_body_size 한도를 산출.
-// 책임: 한도값 자체의 정의는 Config 레이어 소유, 여기선 buffer 의 현재 상태로
-//       서버블록/location 을 골라 "이 요청에 적용할 한도" 를 매핑하는 정책 결정만 담당.
 size_t ClientSocket::resolveMaxBodySize() const
 {
 	const ServerBlock* block = selectServerBlockFromBuffer();
@@ -120,10 +102,6 @@ size_t ClientSocket::resolveMaxBodySize() const
 }
 
 // 역할: raw 헤더 영역에서 특정 키의 등장 횟수를 센다.
-// 책임: RFC 7230 §3.3.3 중복 헤더 검출을 validateHeaders 가 사용할 수 있도록 한 정수만
-//       돌려준다. 의미론적 판정(중복=400 등)은 호출자 책임.
-//       extractRawHeader 와 동일한 case-insensitive 정책을 적용해야 "Content-Length"
-//       와 "content-length" 가 섞인 위장 중복(request smuggling 시나리오)도 잡힌다.
 size_t ClientSocket::countRawHeader(const std::string& key) const
 {
 	const char* crlf = "\r\n\r\n";
@@ -143,8 +121,6 @@ size_t ClientSocket::countRawHeader(const std::string& key) const
 }
 
 // 역할: Content-Length 문자열을 안전하게 size_t 로 파싱(공백 트림, 음수/부호/지수 거부, 누적 곱셈 오버플로 검출).
-// 책임: 헤더 한 값에 대한 형식/범위 검증의 단일 진실. errno 의존 없이 자체 가드로 끝내,
-//       호출자(validateHeaders/isBodyTooLarge/isRequestComplete) 가 일관된 결과로 분기 가능.
 bool ClientSocket::parseContentLength(const std::string& cl_str, size_t& out) const
 {
 	if (cl_str.empty())
@@ -169,9 +145,7 @@ bool ClientSocket::parseContentLength(const std::string& cl_str, size_t& out) co
 	return true;
 }
 
-// 역할: 헤더 완성 직후 RFC 7230 §3.3.3 위반(Content-Length 중복, CL+Transfer-Encoding 동시, 비숫자/오버플로) 검사.
-// 책임: HTTP body 길이 결정 직전 마지막 게이트. status code(현재 400) 반환에만 책임지고,
-//       응답 구성은 호출자(handleRead → sendErrorResponse) 에 위임.
+// 역할: 헤더 완성 직후 검사(Content-Length 중복, CL+Transfer-Encoding 동시, 비숫자/오버플로) 검사.
 int ClientSocket::validateHeaders() const
 {
 	if (countRawHeader("Content-Length") > 1)
@@ -192,8 +166,6 @@ int ClientSocket::validateHeaders() const
 }
 
 // 역할: 파싱 전 단계에서 raw Host 헤더로 서버블록(가상호스트) 매칭.
-// 책임: 에러 응답 본문 생성처럼 HttpRequest 호출 전에도 서버블록이 필요한 경로의 단일 입구.
-//       매칭 실패 시 첫 블록 fallback 정책도 여기서 결정.
 const ServerBlock* ClientSocket::selectServerBlockFromBuffer() const
 {
 	if (_server_blocks.empty())
@@ -212,8 +184,6 @@ const ServerBlock* ClientSocket::selectServerBlockFromBuffer() const
 }
 
 // 역할: HttpRequest 파싱 완료 후 정규화된 host 헤더로 서버블록 매칭.
-// 책임: 정상 요청 처리 경로(processRequest)에서 RequestHandler 에 전달할 서버블록을 확정.
-//       헤더 키는 HttpRequest 가 lowercase 로 저장한다는 계약에 의존.
 const ServerBlock* ClientSocket::selectServerBlock() const
 {
 	if (_server_blocks.empty())
@@ -237,8 +207,6 @@ const ServerBlock* ClientSocket::selectServerBlock() const
 }
 
 // 역할: Content-Length(선제) + 누적 body(chunked 대비) 두 경로로 한도 초과 여부를 판정.
-// 책임: 413 으로 끊을지 말지의 단일 결정점. 한도 산출은 resolveMaxBodySize 위임,
-//       응답 구성은 호출자 위임. 한도=0 은 무제한이라는 nginx 관례를 따른다.
 bool ClientSocket::isBodyTooLarge() const
 {
 	size_t max_size = resolveMaxBodySize();
@@ -262,8 +230,6 @@ bool ClientSocket::isBodyTooLarge() const
 }
 
 // 역할: 헤더 완성 + body(또는 chunked 종결 마커) 까지 모두 수신됐는지 판정.
-// 책임: processRequest 진입 가능 시점에 대한 네트워크 레이어 결정자. chunked 트레일러
-//       의미 해석 자체는 RequestHandler 의 몫이며 여기선 종결 패턴 도달 여부만 본다.
 bool ClientSocket::isRequestComplete() const
 {
 	const char* crlf = "\r\n\r\n";
@@ -301,8 +267,6 @@ bool ClientSocket::isRequestComplete() const
 
 // 역할: 본문(error_page 매핑)은 RequestHandler::generateErrorPage 에 위임하고, status-line/
 //       Connection: close 헤더만 네트워크 레이어에서 보강해 _send_buffer 까지 완성.
-// 책임: 에러 응답의 진입 단일점. ServerBlock 선택은 _recv_buffer 의 raw 헤더에 의존하므로
-//       반드시 clear 보다 먼저 수행. 본문/Content-Length 는 RequestHandler 와 HttpResponse 의 책임.
 void ClientSocket::sendErrorResponse(int status_code)
 {
 	std::cerr << "[error] " << status_code << " fd=" << _client_fd << std::endl;
@@ -338,8 +302,6 @@ void ClientSocket::sendErrorResponse(int status_code)
 }
 
 // 역할: 완성된 요청을 HttpRequest 로 파싱 → 서버블록 선택 → RequestHandler 로 흘려 응답 또는 CGI 분기를 결정.
-// 책임: 네트워크 레이어와 HTTP 레이어의 접점. 파싱 실패/HTTP/1.1 Host 누락/서버블록 부재 같은
-//       사전 게이트만 여기서 잡고, 라우팅/CGI 실행/응답 본문 생성은 RequestHandler 의 책임.
 void ClientSocket::processRequest()
 {
 	if (!_request.parse(_recv_buffer)) {
@@ -381,7 +343,6 @@ void ClientSocket::processRequest()
 }
 
 // 역할: HTTP 버전 기본값 + Connection 헤더로 keep-alive 여부 결정.
-// 책임: 응답 송신 완료 시점의 분기점만 제공. 실제 상태 초기화는 resetForKeepAlive 가 담당.
 bool ClientSocket::isKeepAlive() const
 {
 	const std::map<std::string, std::string>& headers = _request.getHeaders();
@@ -397,9 +358,6 @@ bool ClientSocket::isKeepAlive() const
 }
 
 // 역할: 같은 연결에서 다음 요청을 받기 위해 buffer/요청/응답/핸들러 상태를 리셋.
-// 책임: 소켓 fd 와 _server_blocks 같은 "연결 단위" 자원은 유지하고, "요청 단위" 자원만
-//       초기화. RequestHandler::clear 호출로 이전 요청의 CGI 포인터/내부 상태가 다음
-//       사이클에 누수되지 않도록 보장하는 것도 여기 책임.
 void ClientSocket::resetForKeepAlive()
 {
 	_recv_buffer.clear();
@@ -414,8 +372,6 @@ void ClientSocket::resetForKeepAlive()
 }
 
 // 역할: EPOLLIN 발화 시 1회 recv → 누적 → (헤더 완성 시) 검증/한도 검사 → (요청 완성 시) processRequest 트리거.
-// 책임: 네트워크 수신의 단일 입구. LT 모드 가정 하에 잔여 EPOLLIN 은 다음 사이클로 미루고,
-//       READING 외 상태에서는 동일 요청 중복 처리 방지를 위해 즉시 반환.
 void ClientSocket::handleRead()
 {
 	if (_state != READING)
@@ -458,8 +414,6 @@ void ClientSocket::handleRead()
 }
 
 // 역할: EPOLLOUT 발화 시 _send_buffer 의 미전송 구간을 1회 send → 송신 완료 시 keep-alive/close 분기.
-// 책임: 네트워크 송신의 단일 입구. errno 검사 금지 룰에 따라 n<0 은 즉시 DONE 으로 종료시키며,
-//       부분 전송은 _bytes_sent 누적으로 LT 재발화에 맡긴다.
 void ClientSocket::handleWrite()
 {
 	ssize_t n = send(_client_fd,
@@ -485,7 +439,6 @@ void ClientSocket::handleWrite()
 }
 
 // 역할: ServerManager 가 CGI 파이프를 epoll 에 등록할 수 있도록 write 파이프 fd 를 노출.
-// 책임: 파이프 fd 의 소유/수명은 Cgi 가 가지며, 여기선 핸들러를 통해 단순 조회만 한다.
 int ClientSocket::getCgiWriteFd() const
 {
 	Cgi* cgi = _request_handler.getCgi();
@@ -501,7 +454,6 @@ int ClientSocket::getCgiReadFd() const
 }
 
 // 역할: CGI 자식 PID 노출 (없으면 -1).
-// 책임: ServerManager 의 SIGKILL/waitpid 경로가 자식을 안전하게 회수할 수 있도록 PID 만 전달.
 pid_t ClientSocket::getCgiPid() const
 {
 	Cgi* cgi = _request_handler.getCgi();
@@ -509,8 +461,7 @@ pid_t ClientSocket::getCgiPid() const
 }
 
 // 역할: CGI stdin 파이프 EPOLLOUT 발화 시 POST body 를 1회 전송, 0 반환 시 read 단계로 전이.
-// 책임: 파이프 I/O 자체는 Cgi 가 수행하고, 여기선 상태 머신 전이와 활동 시각 갱신만 담당.
-//       n<0 시 errno 구분 불가 룰 때문에 즉시 DONE 으로 끊지 않고 LT 재발화에 맡긴다.
+// 책임: 파이프 I/O 자체는 Cgi 가 수행하고, n<0 시 errno 구분 불가 룰 때문에 즉시 DONE 으로 끊지 않고 LT 재발화에 맡긴다.
 void ClientSocket::handleCgiWrite()
 {
 	Cgi* cgi = _request_handler.getCgi();
@@ -524,8 +475,6 @@ void ClientSocket::handleCgiWrite()
 }
 
 // 역할: CGI stdout 파이프 EPOLLIN 발화 시 1회 읽기, EOF(=0) 시 RequestHandler 로 응답 합성을 위임 후 WRITING 으로 전이.
-// 책임: 파이프 read 자체는 Cgi 가 담당하고, 여기선 EOF 시점에 RequestHandler::handleCgiResponse 를
-//       불러 _response 를 채우고 _send_buffer 까지 직렬화하는 흐름만 조립.
 void ClientSocket::handleCgiRead()
 {
 	Cgi* cgi = _request_handler.getCgi();
