@@ -9,7 +9,7 @@ UPLOAD_DIR = "www/uploads"
 
 try:
     if not os.path.isdir(UPLOAD_DIR):
-        sys.stdout.write(json.dumps({"files": []}))
+        (sys.stdout.write(json.dumps({"files": []})))
     else:
         files = []
         for name in sorted(os.listdir(UPLOAD_DIR)):
