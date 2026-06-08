@@ -2,6 +2,17 @@
 
 #include <limits>
 
+// RFC 7230 §3.2: 헤더 이름은 case-insensitive. extractRawHeader/countRawHeader 가
+// 동일한 lowercase 사본 위에서 일관되게 매칭하도록 file-scope helper 로 공유.
+// std::tolower(int) 가 음수 입력에서 UB 가능하므로 unsigned char 로 가드.
+static std::string toLowerAscii(const std::string& s)
+{
+	std::string out(s.size(), '\0');
+	for (size_t i = 0; i < s.size(); ++i)
+		out[i] = static_cast<char>(std::tolower(static_cast<unsigned char>(s[i])));
+	return out;
+}
+
 // 역할: 멤버 fd/카운터/타임스탬프를 0/-1 같은 무효값으로 두고 상태를 READING 으로 시작.
 // 책임: 실제 fd/주소/서버블록 주입은 init() 에 위임. 소멸자에서 안전한 close 분기가
 //       되도록 "아직 아무 리소스도 보유하지 않음" 을 보장.
@@ -45,6 +56,8 @@ bool ClientSocket::isHeaderComplete() const
 // 역할: 파싱 전 raw recv_buffer 의 헤더 영역에서 특정 키의 값을 잘라 반환.
 // 책임: HttpRequest 가 아직 호출되지 않은 단계(서버블록 선택/Content-Length 검증 등)에서
 //       필요한 헤더 한 건을 얻기 위한 임시 추출. 본격 헤더 처리는 HttpRequest 책임.
+//       RFC 7230 §3.2 case-insensitive 매칭 + §3.2.4 OWS 양쪽 trim 적용.
+//       request-line(첫 줄)은 헤더가 아니므로 항상 "\r\n" + key + ":" 패턴으로 매칭.
 std::string ClientSocket::extractRawHeader(const std::string& key) const
 {
 	const char* crlf = "\r\n\r\n";
@@ -52,12 +65,24 @@ std::string ClientSocket::extractRawHeader(const std::string& key) const
 		std::search(_recv_buffer.begin(), _recv_buffer.end(), crlf, crlf + 4);
 
 	std::string header_str(_recv_buffer.begin(), header_end);
-	std::string search_key = key + ": ";
-	size_t pos = header_str.find(search_key);
+	std::string lower = toLowerAscii(header_str);
+	std::string needle = "\r\n" + toLowerAscii(key) + ":";
+
+	size_t pos = lower.find(needle);
 	if (pos == std::string::npos)
 		return "";
-	size_t end = header_str.find("\r\n", pos + search_key.size());
-	return header_str.substr(pos + search_key.size(), end - pos - search_key.size());
+
+	size_t val_start = pos + needle.size();
+	size_t line_end = header_str.find("\r\n", val_start);
+	if (line_end == std::string::npos)
+		line_end = header_str.size();
+
+	while (val_start < line_end && (header_str[val_start] == ' ' || header_str[val_start] == '\t'))
+		val_start++;
+	while (line_end > val_start && (header_str[line_end - 1] == ' ' || header_str[line_end - 1] == '\t'))
+		line_end--;
+
+	return header_str.substr(val_start, line_end - val_start);
 }
 
 // 역할: raw request-line 에서 URI 토큰만 잘라 반환.
@@ -97,17 +122,20 @@ size_t ClientSocket::resolveMaxBodySize() const
 // 역할: raw 헤더 영역에서 특정 키의 등장 횟수를 센다.
 // 책임: RFC 7230 §3.3.3 중복 헤더 검출을 validateHeaders 가 사용할 수 있도록 한 정수만
 //       돌려준다. 의미론적 판정(중복=400 등)은 호출자 책임.
+//       extractRawHeader 와 동일한 case-insensitive 정책을 적용해야 "Content-Length"
+//       와 "content-length" 가 섞인 위장 중복(request smuggling 시나리오)도 잡힌다.
 size_t ClientSocket::countRawHeader(const std::string& key) const
 {
 	const char* crlf = "\r\n\r\n";
 	std::vector<char>::const_iterator header_end =
 		std::search(_recv_buffer.begin(), _recv_buffer.end(), crlf, crlf + 4);
 	std::string header_str(_recv_buffer.begin(), header_end);
+	std::string lower = toLowerAscii(header_str);
+	std::string needle = "\r\n" + toLowerAscii(key) + ":";
 
-	std::string needle = "\r\n" + key + ":";
 	size_t count = 0;
 	size_t pos = 0;
-	while ((pos = header_str.find(needle, pos)) != std::string::npos) {
+	while ((pos = lower.find(needle, pos)) != std::string::npos) {
 		count++;
 		pos += needle.size();
 	}
