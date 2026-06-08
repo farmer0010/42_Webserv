@@ -25,9 +25,16 @@ void RequestHandler::init(const HttpRequest& req, const ServerBlock* config) {
     this->_server_config = config;
     this->response.init();
 
+    std::string uri = this->request.getUri();
+    std::string path_part = uri;
+    size_t q = uri.find('?');
+    if (q != std::string::npos) {
+        path_part = uri.substr(0, q);
+    }
+
     if (this->_server_config != NULL) {
-        const Location& loc = this->_server_config->getLocationForUri(this->request.getUri());
-        this->absolute_path = loc.getRoot() + this->request.getUri();
+        const Location& loc = this->_server_config->getLocationForUri(path_part);
+        this->absolute_path = loc.getRoot() + path_part;
 
         if (this->request.getMethod() == "GET" && isDirectory(this->absolute_path)) {
             if (this->absolute_path[this->absolute_path.length() - 1] != '/')
@@ -35,7 +42,7 @@ void RequestHandler::init(const HttpRequest& req, const ServerBlock* config) {
             this->absolute_path += loc.getIndex();
         }
     } else {
-        this->absolute_path = "./html" + this->request.getUri();
+        this->absolute_path = "./html" + path_part;
         if (this->request.getMethod() == "GET" && isDirectory(this->absolute_path)) {
             if (this->absolute_path[this->absolute_path.length() - 1] != '/')
                 this->absolute_path += "/";
@@ -45,8 +52,15 @@ void RequestHandler::init(const HttpRequest& req, const ServerBlock* config) {
 }
 
 HttpResponse RequestHandler::processRequest() {
+    std::string uri = this->request.getUri();
+    std::string path_part = uri;
+    size_t q = uri.find('?');
+    if (q != std::string::npos) {
+        path_part = uri.substr(0, q);
+    }
+
     if (this->_server_config != NULL) {
-        const Location& loc = this->_server_config->getLocationForUri(this->request.getUri());
+        const Location& loc = this->_server_config->getLocationForUri(path_part);
         const std::vector<std::string>& allowed = loc.getAllowMethods();
         if (std::find(allowed.begin(), allowed.end(), this->request.getMethod()) == allowed.end()) {
             generateErrorPage(405, this->_server_config);
